@@ -369,6 +369,6 @@ app.delete('/api/results', async (req, res) => {
 
 initResultsFile().then(() => {
     server.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`);
+        console.log(`Server running on https://blitzing-2.onrender.com`);
     });
 });

@@ -90,7 +90,7 @@
     const cancelPassword = document.getElementById('cancelPassword');
 
     const CANCEL_PASSWORD = 'PUC103815';
-    const API_BASE_URL = 'http://localhost:3000/api';
+    const API_BASE_URL = 'https://blitzing-2.onrender.com/api';
 
     // Rating options
     const ratingOptions = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600];

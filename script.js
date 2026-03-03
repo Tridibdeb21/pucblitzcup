@@ -22,18 +22,27 @@
     let apiCheckInterval = null;
     let totalDurationSec = 600;
     let timeLeftSec = 600;
-    let checkIntervalSec = 3;
+    let checkIntervalSec = 1;
     let currentProblem = null;
     let problemLocked = false;
     let breakActive = false;
     let breakSecondsLeft = 0;
     let breakStartTime = null;
-    let usedProblemIds = new Set();
     let currentProblemIndex = 0;
     let blitzNumber = 1;
     let notificationPermission = false;
     let battleStartTime = null;
     let battleDuration = 600;
+    let battleEndsAt = null;
+    let matchKey = null;
+    let selectedProblems = [];
+    let resultSubmitted = false;
+    let validationProblem = null;
+    let queuedNextProblem = null;
+    let solveNotificationKeys = new Set();
+    let matchEndNotificationShown = false;
+    let matchCountdownTimer = null;
+    let matchCountdownEndsAt = null;
     
     // Track solved problems
     let p1SolvedProblems = new Set();
@@ -41,7 +50,13 @@
     
     // Problems configuration
     let problems = [
-        { points: 500, rating: 1200 }
+        { points: 2, rating: 800 },
+        { points: 3, rating: 800 },
+        { points: 4, rating: 900 },
+        { points: 6, rating: 1000 },
+        { points: 8, rating: 1000 },
+        { points: 10, rating: 1100 },
+        { points: 12, rating: 1200 }
     ];
     let problemResults = {
         p1: [],
@@ -54,13 +69,13 @@
     const loggedInfo = document.getElementById('loggedInfo');
     const createRoomBtn = document.getElementById('createRoomBtn');
     const roomNameInput = document.getElementById('roomNameInput');
+    const opponentHandleInput = document.getElementById('opponentHandleInput');
     const createDuration = document.getElementById('createDuration');
     const createInterval = document.getElementById('createInterval');
     const createProblemsList = document.getElementById('createProblemsList');
     const createAddProblemBtn = document.getElementById('createAddProblemBtn');
     const joinRoomBtn = document.getElementById('joinRoomBtn');
     const joinRoomIdInput = document.getElementById('joinRoomIdInput');
-    const joinRoomPasswordInput = document.getElementById('joinRoomPasswordInput');
     const activeBlitzList = document.getElementById('activeBlitzList');
     const roomControls = document.getElementById('roomControls');
     const activeBlitzSection = document.getElementById('activeBlitzSection');
@@ -68,8 +83,13 @@
     const currentRoomName = document.getElementById('currentRoomName');
     const currentRoomId = document.getElementById('currentRoomId');
     const roomPlayers = document.getElementById('roomPlayers');
+    const roomValidationMini = document.getElementById('roomValidationMini');
     const leaveRoomBtn = document.getElementById('leaveRoomBtn');
     const configDashboard = document.getElementById('configDashboard');
+    const validationSection = document.getElementById('validationSection');
+    const validationProblemLink = document.getElementById('validationProblemLink');
+    const validationProblemTitle = document.getElementById('validationProblemTitle');
+    const validationStatusText = document.getElementById('validationStatusText');
     const displayDuration = document.getElementById('displayDuration');
     const displayInterval = document.getElementById('displayInterval');
     const displayProblems = document.getElementById('displayProblems');
@@ -79,6 +99,8 @@
     const leaderboard = document.getElementById('leaderboard');
     const arenaPanel = document.getElementById('arenaPanel');
     const startBattleBtn = document.getElementById('startBattleBtn');
+    const startP1HandleInput = document.getElementById('startP1HandleInput');
+    const startP2HandleInput = document.getElementById('startP2HandleInput');
     const cancelGameBtn = document.getElementById('cancelGameBtn');
     
     // Battle DOM elements
@@ -107,14 +129,12 @@
     const passwordInput = document.getElementById('passwordInput');
     const confirmCancel = document.getElementById('confirmCancel');
     const cancelPassword = document.getElementById('cancelPassword');
-    const roomPasswordModal = document.getElementById('roomPasswordModal');
-    const createdRoomId = document.getElementById('createdRoomId');
-    const createdRoomPassword = document.getElementById('createdRoomPassword');
-    const closeRoomPasswordModal = document.getElementById('closeRoomPasswordModal');
     const celebrationModal = document.getElementById('celebrationModal');
     const winnerHandleSpan = document.getElementById('winnerHandle');
     const closeCelebrationBtn = document.getElementById('closeCelebration');
     const notificationCenter = document.getElementById('notificationCenter');
+    const matchCountdownOverlay = document.getElementById('matchCountdownOverlay');
+    const matchCountdownTime = document.getElementById('matchCountdownTime');
 
     const CANCEL_PASSWORD = 'PUC103815';
     const API_BASE_URL = window.location.origin;
@@ -166,9 +186,49 @@
         localStorage.setItem('blitzRoomState', JSON.stringify(state));
     }
 
+    function getRuntimeStateKey() {
+        return 'blitzBattleRuntimeState';
+    }
+
+    function saveBattleRuntimeState() {
+        if (!battleActive || !currentRoom || !matchKey) return;
+        const runtimeState = {
+            roomId: currentRoom,
+            matchKey,
+            player1Score,
+            player2Score,
+            currentProblemIndex,
+            currentProblem,
+            problemLocked,
+            breakActive,
+            breakSecondsLeft,
+            breakStartTime,
+            problemResults,
+            p1SolvedProblems: Array.from(p1SolvedProblems),
+            p2SolvedProblems: Array.from(p2SolvedProblems),
+            savedAt: Date.now()
+        };
+        localStorage.setItem(getRuntimeStateKey(), JSON.stringify(runtimeState));
+    }
+
+    function loadBattleRuntimeState() {
+        const saved = localStorage.getItem(getRuntimeStateKey());
+        if (!saved) return null;
+        try {
+            return JSON.parse(saved);
+        } catch {
+            return null;
+        }
+    }
+
+    function clearBattleRuntimeState() {
+        localStorage.removeItem(getRuntimeStateKey());
+    }
+
     // Clear saved state
     function clearSavedState() {
         localStorage.removeItem('blitzRoomState');
+        clearBattleRuntimeState();
     }
 
     // Reconnect to room
@@ -231,13 +291,18 @@
                 roomData = {
                     id: data.roomId,
                     name: data.roomName,
+                    opponentHandle: data.opponentHandle,
                     duration: data.duration,
                     interval: data.interval,
-                    problems: data.problems
+                    problems: data.problems,
+                    validationProblem: data.validationProblem
                 };
-                showRoomPassword(data.roomId, data.password, data.roomName);
-                joinRoomUI(data.roomId, data.roomName, [userHandle], data.duration, data.interval, data.problems);
+                joinRoomUI(data.roomId, data.roomName, [userHandle], data.duration, data.interval, data.problems, data.validationProblem);
                 saveState();
+                break;
+
+            case 'CREATE_ERROR':
+                alert(data.message || 'Failed to create room');
                 break;
                 
             case 'ROOM_JOINED':
@@ -246,11 +311,16 @@
                 roomData = {
                     id: data.roomId,
                     name: data.roomName,
+                    opponentHandle: data.opponentHandle,
                     duration: data.duration,
                     interval: data.interval,
-                    problems: data.problems
+                    problems: data.problems,
+                    validationProblem: data.validationProblem
                 };
-                joinRoomUI(data.roomId, data.roomName, data.players, data.duration, data.interval, data.problems);
+                joinRoomUI(data.roomId, data.roomName, data.players, data.duration, data.interval, data.problems, data.validationProblem);
+                if (data.countdownInProgress && data.countdownEndsAt) {
+                    startMatchCountdown(data.countdownEndsAt);
+                }
                 saveState();
                 break;
                 
@@ -258,10 +328,20 @@
                 currentRoom = data.roomId;
                 isHost = data.isHost;
                 roomData = data.roomData;
-                joinRoomUI(data.roomId, data.roomData.name, data.players, data.roomData.duration, data.roomData.interval, data.roomData.problems);
+                joinRoomUI(
+                    data.roomId,
+                    data.roomData.name,
+                    data.roomData.players || [],
+                    data.roomData.duration,
+                    data.roomData.interval,
+                    data.roomData.problems,
+                    data.roomData.validationProblem
+                );
                 
-                if (data.battleState) {
-                    restoreBattleState(data.battleState);
+                if (data.roomData.battleState && data.roomData.battleState.status === 'running') {
+                    restoreBattleState(data.roomData.battleState);
+                } else if (data.roomData.countdownInProgress && data.roomData.countdownEndsAt) {
+                    startMatchCountdown(data.roomData.countdownEndsAt);
                 }
                 saveState();
                 break;
@@ -289,46 +369,177 @@
                 break;
                 
             case 'BATTLE_STARTED':
+                stopMatchCountdown();
+                showDesktopNotification('🚀 Match Started', 'Blitz match has started for both players.');
                 startBattleFromHost(data.battleState);
+                break;
+
+            case 'MATCH_COUNTDOWN_STARTED':
+                startMatchCountdown(data.startsAt);
+                break;
+
+            case 'START_ERROR':
+                if (validationStatusText && data.message) {
+                    validationStatusText.textContent = data.message;
+                }
+                break;
+
+            case 'VALIDATION_STATUS': {
+                const pair = data.pair || [];
+                const statuses = data.statuses || {};
+                if (pair.length >= 2) {
+                    startP1HandleInput.value = pair[0];
+                    startP2HandleInput.value = pair[1];
+                    startP1HandleInput.disabled = true;
+                    startP2HandleInput.disabled = true;
+
+                    const p1Ok = !!statuses[pair[0]];
+                    const p2Ok = !!statuses[pair[1]];
+                    validationStatusText.textContent = `${pair[0]}: ${p1Ok ? 'CE ✅' : 'CE ⏳'} | ${pair[1]}: ${p2Ok ? 'CE ✅' : 'CE ⏳'} · ${data.message || ''}`;
+                } else {
+                    validationStatusText.textContent = data.message || 'Waiting for match creator and selected opponent to be connected.';
+                }
+                break;
+            }
+
+            case 'BATTLE_FINISHED':
+                stopBattle(true);
+                break;
+
+            case 'PROBLEM_SOLVED': {
+                const solveKey = data.solveKey || `${data.problemId}:${data.solverHandle}`;
+                if (!solveNotificationKeys.has(solveKey)) {
+                    solveNotificationKeys.add(solveKey);
+                    showDesktopNotification('✅ Problem Solved!', `${data.solverHandle} solved Problem ${data.problemNumber}!`);
+                }
+                break;
+            }
+
+            case 'NEXT_PROBLEM_READY': {
+                const nextProblemNumber = Number(data.problemNumber) || 0;
+                const nextProblemIndex = nextProblemNumber - 1;
+                if (nextProblemIndex >= 0 && data.problem) {
+                    if (!Array.isArray(selectedProblems)) {
+                        selectedProblems = [];
+                    }
+                    selectedProblems[nextProblemIndex] = data.problem;
+
+                    if (battleActive && currentProblemIndex === nextProblemIndex && !currentProblem) {
+                        queuedNextProblem = data.problem;
+                        loadNextProblem().then(() => {
+                            if (battleActive && !breakActive && currentProblem && !apiCheckInterval) {
+                                apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+                            }
+                        });
+                    } else if (breakActive && currentProblemIndex === nextProblemIndex) {
+                        queuedNextProblem = data.problem;
+                    }
+
+                    showDesktopNotification('🆕 New Problem Ready', `Problem ${nextProblemNumber} generated and ready for next round.`);
+
+                    saveBattleRuntimeState();
+                }
+                break;
+            }
+
+            case 'NEXT_PROBLEM_ERROR':
+                if (data.message && breakActive) {
+                    lockStatusDiv.textContent = `⏳ ${data.message}`;
+                }
+                break;
+
+            case 'ROOM_CLOSED':
+                if (data.roomId === currentRoom) {
+                    showDesktopNotification('ℹ️ Blitz Ended', data.message || 'This room has ended and moved to past results.');
+                    leaveRoom();
+                }
                 break;
         }
     }
 
     function restoreBattleState(state) {
+        stopMatchCountdown();
         player1Handle = state.player1Handle;
         player2Handle = state.player2Handle;
-        player1Score = state.player1Score;
-        player2Score = state.player2Score;
-        battleActive = state.battleActive;
-        timeLeftSec = state.timeLeftSec;
-        battleStartTime = state.battleStartTime;
-        battleDuration = state.battleDuration;
-        currentProblemIndex = state.currentProblemIndex;
-        currentProblem = state.currentProblem;
-        problemLocked = state.problemLocked;
-        breakActive = state.breakActive;
-        breakSecondsLeft = state.breakSecondsLeft;
-        breakStartTime = state.breakStartTime;
-        problems = state.problems;
-        problemResults = state.problemResults;
+        const problemConfigs = state.problemConfigs || [];
+        selectedProblems = state.selectedProblems || [];
+        if (problemConfigs.length > 0) {
+            problems = problemConfigs.map(problem => ({ points: problem.points, rating: problem.rating }));
+        } else {
+            problems = selectedProblems
+                .filter(problem => !!problem)
+                .map(problem => ({ points: problem.points, rating: problem.rating }));
+        }
+        totalDurationSec = state.duration * 60;
+        checkIntervalSec = state.interval;
+        battleStartTime = state.startsAt;
+        battleEndsAt = state.endsAt;
+        battleDuration = totalDurationSec;
+        matchKey = `${currentRoom}-${state.startsAt}`;
+        resultSubmitted = false;
+        matchEndNotificationShown = false;
+
+        player1Score = 0;
+        player2Score = 0;
+        battleActive = true;
+        currentProblemIndex = 0;
+        currentProblem = null;
+        problemLocked = false;
+        breakActive = false;
+        breakSecondsLeft = 0;
+        breakStartTime = null;
+        timeLeftSec = Math.max(0, Math.floor((battleEndsAt - Date.now()) / 1000));
+        problemResults = {
+            p1: problems.map(() => ({ attempts: 0, solved: false })),
+            p2: problems.map(() => ({ attempts: 0, solved: false }))
+        };
+
+        const runtimeState = loadBattleRuntimeState();
+        if (runtimeState && runtimeState.roomId === currentRoom && runtimeState.matchKey === matchKey) {
+            player1Score = runtimeState.player1Score || 0;
+            player2Score = runtimeState.player2Score || 0;
+            currentProblemIndex = runtimeState.currentProblemIndex || 0;
+            currentProblem = runtimeState.currentProblem || null;
+            problemLocked = !!runtimeState.problemLocked;
+            breakActive = !!runtimeState.breakActive;
+            breakStartTime = runtimeState.breakStartTime || null;
+            problemResults = runtimeState.problemResults || problemResults;
+            p1SolvedProblems = new Set(runtimeState.p1SolvedProblems || []);
+            p2SolvedProblems = new Set(runtimeState.p2SolvedProblems || []);
+
+            if (breakActive && breakStartTime) {
+                const elapsedSeconds = Math.floor((Date.now() - breakStartTime) / 1000);
+                breakSecondsLeft = Math.max(0, 60 - elapsedSeconds);
+                if (breakSecondsLeft <= 0) {
+                    breakActive = false;
+                    breakStartTime = null;
+                    breakSecondsLeft = 0;
+                }
+            }
+        }
         
         showBattleUI();
+        validationSection.style.display = 'none';
         updatePlayerUI();
+        renderProblemsDisplay();
         updateTimerDisplay();
-        
+
         if (currentProblem) {
+            const problemPoints = selectedProblems[Math.max(0, currentProblemIndex - 1)]?.points || currentProblem.points || 500;
             probNameSpan.textContent = currentProblem.name;
-            probPointsSpan.textContent = problems[currentProblemIndex - 1]?.points || 500;
+            probPointsSpan.textContent = problemPoints;
             probRatingSpan.textContent = `Rating: ${currentProblem.rating}`;
             problemUrl.href = currentProblem.url;
             problemUrl.style.pointerEvents = 'auto';
             problemUrl.style.opacity = '1';
-            
-            lockStatusDiv.textContent = problemLocked ? 
-                `🔒 LOCKED · solved` : 
-                `🔓 Problem ${currentProblemIndex}/${problems.length} · waiting for AC`;
+            lockStatusDiv.textContent = problemLocked
+                ? `🔒 LOCKED · solved`
+                : `🔓 Problem ${currentProblemIndex}/${problems.length} · waiting for AC`;
+            lockStatusDiv.className = 'problem-lock-status';
+        } else if (!breakActive) {
+            loadNextProblem();
         }
-        
+
         if (breakActive) {
             breakTimerDiv.style.display = 'block';
             breakTimerDiv.textContent = `⏳ break ${breakSecondsLeft}s`;
@@ -338,7 +549,11 @@
         
         startBattleTimer();
         if (apiCheckInterval) clearInterval(apiCheckInterval);
-        apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+        if (!breakActive) {
+            apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+        }
+
+        saveBattleRuntimeState();
     }
 
     // Render problems in create room form
@@ -393,13 +608,36 @@
         renderCreateProblems();
     });
 
-    function showRoomPassword(roomId, password, roomName) {
-        createdRoomId.textContent = roomId;
-        createdRoomPassword.textContent = password;
-        roomPasswordModal.style.display = 'flex';
+    function setValidationProblem(problem, players = []) {
+        validationProblem = problem || null;
+
+        validationSection.style.display = 'block';
+        if (!validationProblem) {
+            validationProblemLink.href = '#';
+            validationProblemLink.style.pointerEvents = 'none';
+            validationProblemLink.style.opacity = '0.7';
+            validationProblemTitle.textContent = 'Generating validation problem...';
+            validationStatusText.textContent = 'Please wait. Validation problem is being prepared.';
+            roomValidationMini.style.display = 'none';
+            return;
+        }
+
+        validationProblemLink.href = validationProblem.url;
+        validationProblemLink.style.pointerEvents = 'auto';
+        validationProblemLink.style.opacity = '1';
+        validationProblemTitle.textContent = `${validationProblem.name} · ${validationProblem.rating}`;
+
+        roomValidationMini.href = validationProblem.url;
+        roomValidationMini.style.display = 'inline-block';
+
+        if (players.length < 2) {
+            validationStatusText.textContent = 'Waiting for selected opponent to join match creator room and submit Compilation Error to the provided problem.';
+        } else {
+            validationStatusText.textContent = 'Waiting for match creator and selected opponent to submit Compilation Error to the provided problem.';
+        }
     }
 
-    function joinRoomUI(roomId, roomName, players, duration, interval, roomProblems) {
+    function joinRoomUI(roomId, roomName, players, duration, interval, roomProblems, roomValidationProblem = null) {
         roomControls.style.display = 'none';
         activeBlitzSection.style.display = 'none';
         
@@ -412,11 +650,12 @@
         displayProblems.value = `${roomProblems.length} problems`;
         
         problems = roomProblems;
+        setValidationProblem(roomValidationProblem, players);
         renderProblemsDisplay();
         
         updateRoomPlayers(players);
         
-        if (players.length === 2) {
+        if (players.length >= 2) {
             configDashboard.style.display = 'flex';
             problemsDisplaySection.style.display = 'block';
             
@@ -426,14 +665,14 @@
             p2HandleSpan.textContent = player2Handle;
             p1HandleSpan.href = `https://codeforces.com/profile/${player1Handle}`;
             p2HandleSpan.href = `https://codeforces.com/profile/${player2Handle}`;
+
+            startP1HandleInput.value = player1Handle;
+            startP2HandleInput.value = player2Handle;
             
-            if (isHost) {
-                startBattleBtn.textContent = '▶ START BATTLE';
-                startBattleBtn.disabled = false;
-            } else {
-                startBattleBtn.textContent = '⏳ WAITING FOR HOST';
-                startBattleBtn.disabled = true;
-            }
+            startBattleBtn.textContent = '⏳ AUTO START ENABLED';
+            startBattleBtn.disabled = true;
+            startP1HandleInput.disabled = true;
+            startP2HandleInput.disabled = true;
             
             fetchUserRanks();
         } else {
@@ -457,7 +696,7 @@
     }
 
     function updateRoomPlayers(players) {
-        roomPlayers.textContent = `👥 ${players.length}/2 players`;
+        roomPlayers.textContent = `👥 ${players.length} joined`;
     }
 
     function displayActiveRooms(rooms) {
@@ -472,7 +711,7 @@
                 <div class="blitz-room-card">
                     <div class="blitz-room-info">
                         <h4>${room.name}</h4>
-                        <p>ID: ${room.id} | 👥 ${room.players}/2 players</p>
+                        <p>ID: ${room.id} | 👥 ${room.assignedPlayers || room.players} joined</p>
                         <p>⏱️ ${room.duration} min | 🔄 ${room.interval}s | 📋 ${room.problems} problems</p>
                     </div>
                     <button class="join-this-room-btn" onclick="window.joinRoom('${room.id}')">Join</button>
@@ -488,7 +727,7 @@
             return;
         }
         joinRoomIdInput.value = roomId;
-        joinRoomPasswordInput.focus();
+        joinRoomBtn.focus();
     };
 
     // Set handle
@@ -510,24 +749,47 @@
         loggedInfo.innerHTML = `👤 ${handle}`;
         userHandleInput.disabled = true;
         setHandleBtn.disabled = true;
+        await ensureNotificationPermission();
         saveState();
     });
 
     // Create room
-    createRoomBtn.addEventListener('click', () => {
+    createRoomBtn.addEventListener('click', async () => {
         if (!userHandle) {
             alert('Please set your handle first');
             return;
         }
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert('Connection not ready. Please wait a moment and try again.');
+            return;
+        }
         
         const roomName = roomNameInput.value.trim() || `${userHandle}'s Room`;
-        const duration = parseInt(createDuration.value) || 10;
-        const interval = parseInt(createInterval.value) || 3;
+        const opponentHandle = opponentHandleInput.value.trim();
+        const duration = parseInt(createDuration.value) || 40;
+        const interval = parseInt(createInterval.value) || 1;
+
+        if (!opponentHandle) {
+            alert('Please enter opponent Codeforces handle before creating room');
+            return;
+        }
+        if (opponentHandle === userHandle) {
+            alert('Opponent handle must be different from your handle');
+            return;
+        }
+
+        const opponentValid = await validateHandle(opponentHandle);
+        if (!opponentValid) {
+            alert('Given opponent handle does not exist on Codeforces');
+            return;
+        }
         
         ws.send(JSON.stringify({
             type: 'CREATE_ROOM',
             handle: userHandle,
             roomName: roomName,
+            opponentHandle,
             duration: duration,
             interval: interval,
             problems: problems
@@ -540,19 +802,22 @@
             alert('Please set your handle first');
             return;
         }
+
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert('Connection not ready. Please wait a moment and try again.');
+            return;
+        }
         
         const roomId = joinRoomIdInput.value.trim().toUpperCase();
-        const password = joinRoomPasswordInput.value.trim();
         
-        if (!roomId || !password) {
-            alert('Please enter room ID and password');
+        if (!roomId) {
+            alert('Please enter room ID');
             return;
         }
         
         ws.send(JSON.stringify({
             type: 'JOIN_ROOM',
             roomId: roomId,
-            password: password,
             handle: userHandle
         }));
     });
@@ -570,6 +835,7 @@
     });
 
     function leaveRoom() {
+        stopMatchCountdown();
         currentRoom = null;
         isHost = false;
         roomData = null;
@@ -579,14 +845,22 @@
         activeBlitzSection.style.display = 'block';
         
         roomInfoBar.style.display = 'none';
+        roomValidationMini.style.display = 'none';
         configDashboard.style.display = 'none';
+        validationSection.style.display = 'none';
         problemsDisplaySection.style.display = 'none';
         matchStatusBar.style.display = 'none';
         leaderboard.style.display = 'none';
         arenaPanel.style.display = 'none';
         
-        if (battleActive) {
-            stopBattle();
+        battleActive = false;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        if (apiCheckInterval) {
+            clearInterval(apiCheckInterval);
+            apiCheckInterval = null;
         }
         
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -594,17 +868,52 @@
         }
     }
 
+    function stopMatchCountdown() {
+        if (matchCountdownTimer) {
+            clearInterval(matchCountdownTimer);
+            matchCountdownTimer = null;
+        }
+        matchCountdownEndsAt = null;
+        if (matchCountdownOverlay) {
+            matchCountdownOverlay.style.display = 'none';
+        }
+    }
+
+    function startMatchCountdown(startsAt) {
+        stopMatchCountdown();
+        if (!startsAt) return;
+
+        matchCountdownEndsAt = startsAt;
+        validationSection.style.display = 'block';
+        if (matchCountdownOverlay) {
+            matchCountdownOverlay.style.display = 'flex';
+        }
+
+        const renderCountdown = () => {
+            const remaining = Math.max(0, Math.ceil((matchCountdownEndsAt - Date.now()) / 1000));
+            if (validationStatusText) {
+                validationStatusText.textContent = `Both participants verified. Match starts in ${remaining}s.`;
+            }
+            if (matchCountdownTime) {
+                matchCountdownTime.textContent = `${remaining}`;
+            }
+            if (remaining <= 0) {
+                stopMatchCountdown();
+            }
+        };
+
+        renderCountdown();
+        matchCountdownTimer = setInterval(renderCountdown, 250);
+    }
+
     function showBattleUI() {
         configDashboard.style.display = 'none';
+        validationSection.style.display = 'none';
         problemsDisplaySection.style.display = 'none';
         matchStatusBar.style.display = 'flex';
         leaderboard.style.display = 'block';
         arenaPanel.style.display = 'flex';
     }
-
-    closeRoomPasswordModal.addEventListener('click', () => {
-        roomPasswordModal.style.display = 'none';
-    });
 
     async function validateHandle(handle) {
         try {
@@ -717,6 +1026,32 @@
         leaderboardBody.innerHTML = p1Row + p2Row;
     }
 
+    async function ensureNotificationPermission() {
+        if (typeof Notification === 'undefined') {
+            notificationPermission = false;
+            return false;
+        }
+
+        if (Notification.permission === 'granted') {
+            notificationPermission = true;
+            return true;
+        }
+
+        if (Notification.permission !== 'default') {
+            notificationPermission = false;
+            return false;
+        }
+
+        try {
+            const permission = await Notification.requestPermission();
+            notificationPermission = permission === 'granted';
+            return notificationPermission;
+        } catch {
+            notificationPermission = false;
+            return false;
+        }
+    }
+
     function showDesktopNotification(title, message, isWinner = false) {
         const notification = document.createElement('div');
         notification.className = `desktop-notification ${isWinner ? 'winner' : ''}`;
@@ -728,6 +1063,21 @@
         notificationCenter.appendChild(notification);
         
         setTimeout(() => notification.remove(), 5000);
+
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            try {
+                const osNotification = new Notification(title, {
+                    body: message,
+                    silent: false
+                });
+                osNotification.onclick = () => {
+                    window.focus();
+                    osNotification.close();
+                };
+            } catch (error) {
+                console.warn('OS notification failed:', error);
+            }
+        }
     }
 
     function formatTime(seconds) {
@@ -740,58 +1090,13 @@
         matchTimer.textContent = formatTime(timeLeftSec);
     }
 
-    // Start battle
+    // Start battle button kept for UI compatibility (auto-start mode)
     startBattleBtn.addEventListener('click', async () => {
-        if (!isHost) {
-            alert('Only the host can start the battle');
-            return;
-        }
-        
-        ws.send(JSON.stringify({
-            type: 'START_BATTLE',
-            roomId: currentRoom,
-            battleState: {
-                player1Handle,
-                player2Handle,
-                problems,
-                duration: parseInt(displayDuration.value),
-                interval: parseInt(displayInterval.value),
-                battleStartTime: Date.now()
-            }
-        }));
-        
-        startBattleLocally();
+        validationStatusText.textContent = 'Auto-start is enabled. Waiting for two participants to submit Compilation Error on provided problem.';
     });
 
     function startBattleFromHost(battleState) {
-        player1Handle = battleState.player1Handle;
-        player2Handle = battleState.player2Handle;
-        problems = battleState.problems;
-        totalDurationSec = battleState.duration * 60;
-        checkIntervalSec = battleState.interval;
-        battleStartTime = battleState.battleStartTime;
-        
-        startBattleLocally();
-    }
-
-    function startBattleLocally() {
-        showBattleUI();
-        
-        battleDuration = totalDurationSec;
-        timeLeftSec = battleDuration;
-        
-        player1Score = 0;
-        player2Score = 0;
-        currentProblemIndex = 0;
-        problemResults = { p1: [], p2: [] };
-        usedProblemIds.clear();
-        
-        battleActive = true;
-        
-        startBattleTimer();
-        loadNextProblem();
-        
-        apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+        restoreBattleState(battleState);
     }
 
     function startBattleTimer() {
@@ -803,17 +1108,16 @@
                 return;
             }
             
-            if (battleStartTime) {
+            if (battleEndsAt) {
                 const now = Date.now();
-                const elapsedSeconds = Math.floor((now - battleStartTime) / 1000);
-                const newTimeLeft = Math.max(0, battleDuration - elapsedSeconds);
+                const newTimeLeft = Math.max(0, Math.floor((battleEndsAt - now) / 1000));
                 
                 if (newTimeLeft !== timeLeftSec) {
                     timeLeftSec = newTimeLeft;
                     updateTimerDisplay();
                     
                     if (timeLeftSec <= 0) {
-                        stopBattle();
+                        stopBattle(true);
                     }
                 }
             }
@@ -836,108 +1140,33 @@
         }, 1000);
     }
 
-    async function fetchProblemsFromCF(targetRating) {
-        try {
-            const response = await fetch(`https://codeforces.com/api/problemset.problems?tags=implementation`);
-            const data = await response.json();
-            
-            if (data.status !== 'OK') throw new Error('API error');
-            
-            const problems = data.result.problems;
-            
-            let filtered = problems.filter(p => 
-                p.rating && 
-                Math.abs(p.rating - targetRating) <= 100 &&
-                p.contestId && 
-                p.index
-            );
-            
-            const unsolvedProblems = filtered.filter(p => {
-                const probId = `${p.contestId}${p.index}`;
-                return !p1SolvedProblems.has(probId) && !p2SolvedProblems.has(probId) && !usedProblemIds.has(probId);
-            });
-            
-            if (unsolvedProblems.length === 0) {
-                const widerFiltered = problems.filter(p => 
-                    p.rating && 
-                    p.rating >= 800 && 
-                    p.rating <= 1600 &&
-                    p.contestId && 
-                    p.index
-                );
-                
-                const widerUnsolved = widerFiltered.filter(p => {
-                    const probId = `${p.contestId}${p.index}`;
-                    return !p1SolvedProblems.has(probId) && !p2SolvedProblems.has(probId) && !usedProblemIds.has(probId);
-                });
-                
-                if (widerUnsolved.length === 0) {
-                    throw new Error('No unsolved problems found');
-                }
-                
-                const randomIndex = Math.floor(Math.random() * widerUnsolved.length);
-                const problem = widerUnsolved[randomIndex];
-                const probId = `${problem.contestId}${problem.index}`;
-                
-                usedProblemIds.add(probId);
-                
-                return {
-                    id: probId,
-                    name: problem.name,
-                    rating: problem.rating,
-                    contestId: problem.contestId,
-                    index: problem.index,
-                    url: `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`
-                };
-            }
-            
-            const randomIndex = Math.floor(Math.random() * unsolvedProblems.length);
-            const problem = unsolvedProblems[randomIndex];
-            const probId = `${problem.contestId}${problem.index}`;
-            
-            usedProblemIds.add(probId);
-            
-            return {
-                id: probId,
-                name: problem.name,
-                rating: problem.rating,
-                contestId: problem.contestId,
-                index: problem.index,
-                url: `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`
-            };
-            
-        } catch (error) {
-            console.error('Error:', error);
-            let contestId = 1000 + Math.floor(Math.random() * 1000);
-            let index = 'A';
-            let probId = `${contestId}${index}`;
-            usedProblemIds.add(probId);
-            return {
-                id: probId,
-                name: `Problem A (CF ${contestId})`,
-                rating: targetRating,
-                contestId: contestId,
-                index: index,
-                url: `https://codeforces.com/problemset/problem/${contestId}/A`
-            };
-        }
-    }
-
     async function loadNextProblem() {
         if (!battleActive || currentProblemIndex >= problems.length) {
-            stopBattle();
+            stopBattle(true);
             return;
         }
 
         p1Row.classList.remove('solved');
         p2Row.classList.remove('solved');
-        
-        const problemRating = problems[currentProblemIndex]?.rating || 1200;
-        const prob = await fetchProblemsFromCF(problemRating);
+
+        if (!queuedNextProblem) {
+            queuedNextProblem = selectedProblems[currentProblemIndex] || null;
+        }
+
+        const prob = queuedNextProblem;
+        if (!prob) {
+            currentProblem = null;
+            problemLocked = false;
+            lockStatusDiv.textContent = `⏳ Generating Problem ${currentProblemIndex + 1}/${problems.length}...`;
+            lockStatusDiv.className = 'problem-lock-status';
+            return;
+        }
+
+        queuedNextProblem = null;
         currentProblem = prob;
         currentProblemIndex++;
         
-        const problemPoints = problems[currentProblemIndex - 1]?.points || 500;
+        const problemPoints = selectedProblems[currentProblemIndex - 1]?.points || 500;
         
         probNameSpan.textContent = prob.name;
         probPointsSpan.textContent = problemPoints;
@@ -951,6 +1180,7 @@
         lockStatusDiv.className = 'problem-lock-status';
         
         problemLocked = false;
+        saveBattleRuntimeState();
     }
 
     async function checkSubmissions() {
@@ -1032,7 +1262,7 @@
         if (problemLocked || !battleActive) return;
         
         problemLocked = true;
-        const problemPoints = problems[currentProblemIndex - 1]?.points || 500;
+        const problemPoints = problems[currentProblemIndex - 1]?.points || selectedProblems[currentProblemIndex - 1]?.points || 500;
         
         if (player === 'p1') {
             player1Score += problemPoints;
@@ -1041,7 +1271,6 @@
             if (currentProblem) {
                 p1SolvedProblems.add(currentProblem.id);
             }
-            showDesktopNotification('✅ Problem Solved!', `${player1Handle} solved Problem ${currentProblemIndex}!`);
         } else {
             player2Score += problemPoints;
             problemResults.p2[currentProblemIndex - 1].solved = true;
@@ -1049,7 +1278,24 @@
             if (currentProblem) {
                 p2SolvedProblems.add(currentProblem.id);
             }
-            showDesktopNotification('✅ Problem Solved!', `${player2Handle} solved Problem ${currentProblemIndex}!`);
+        }
+
+        const solverHandle = player === 'p1' ? player1Handle : player2Handle;
+        const solveKey = `${currentProblem?.id || currentProblemIndex}:${solverHandle}`;
+        if (!solveNotificationKeys.has(solveKey)) {
+            solveNotificationKeys.add(solveKey);
+            showDesktopNotification('✅ Problem Solved!', `${solverHandle} solved Problem ${currentProblemIndex}!`);
+        }
+
+        if (ws && ws.readyState === WebSocket.OPEN && currentRoom && currentProblem?.id) {
+            ws.send(JSON.stringify({
+                type: 'PROBLEM_SOLVED',
+                roomId: currentRoom,
+                solverHandle,
+                problemId: currentProblem.id,
+                problemNumber: currentProblemIndex,
+                solveKey: `${currentProblem.id}:${solverHandle}`
+            }));
         }
         
         lockStatusDiv.textContent = `🔒 LOCKED · solved by ${player === 'p1' ? player1Handle : player2Handle}`;
@@ -1058,16 +1304,35 @@
         updatePlayerUI();
         
         if (currentProblemIndex >= problems.length) {
-            stopBattle();
+            lockStatusDiv.textContent = '✅ All problems solved. Ending match now...';
+
+            if (ws && ws.readyState === WebSocket.OPEN && currentRoom) {
+                ws.send(JSON.stringify({
+                    type: 'END_BATTLE_EARLY',
+                    roomId: currentRoom,
+                    reason: 'all-problems-solved'
+                }));
+            }
+
+            stopBattle(true);
         } else {
             startBreak();
         }
+
+        saveBattleRuntimeState();
     }
 
     function startBreak() {
         breakActive = true;
         breakSecondsLeft = 60;
         breakStartTime = Date.now();
+
+        if (currentProblemIndex < problems.length) {
+            queuedNextProblem = selectedProblems[currentProblemIndex] || null;
+        } else {
+            queuedNextProblem = null;
+        }
+
         breakTimerDiv.style.display = 'block';
         breakTimerDiv.textContent = `⏳ break ${breakSecondsLeft}s`;
         breakIndicator.style.display = 'inline-block';
@@ -1077,6 +1342,8 @@
             clearInterval(apiCheckInterval);
             apiCheckInterval = null;
         }
+
+        saveBattleRuntimeState();
     }
 
     function endBreak() {
@@ -1084,15 +1351,67 @@
         breakStartTime = null;
         breakTimerDiv.style.display = 'none';
         breakIndicator.style.display = 'none';
+        saveBattleRuntimeState();
         
         if (battleActive && currentProblemIndex < problems.length) {
             loadNextProblem().then(() => {
-                apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+                if (battleActive && !breakActive && currentProblem) {
+                    apiCheckInterval = setInterval(checkSubmissions, checkIntervalSec * 1000);
+                }
             });
         }
     }
 
-    async function stopBattle() {
+    async function submitBattleResult(winner) {
+        if (resultSubmitted || !matchKey) return;
+
+        const payload = {
+            matchKey,
+            roomId: currentRoom,
+            date: new Date().toISOString(),
+            duration: Math.round(totalDurationSec / 60),
+            winner,
+            player1: {
+                handle: player1Handle,
+                score: player1Score,
+                rank: player1Rank
+            },
+            player2: {
+                handle: player2Handle,
+                score: player2Score,
+                rank: player2Rank
+            },
+            problems: problems.map((configProblem, idx) => {
+                const generatedProblem = selectedProblems[idx] || null;
+                return {
+                id: generatedProblem?.id || '',
+                name: generatedProblem?.name || `Problem ${idx + 1}`,
+                url: generatedProblem?.url || '',
+                contestId: generatedProblem?.contestId || null,
+                index: generatedProblem?.index || '',
+                points: configProblem?.points || generatedProblem?.points || 0,
+                rating: configProblem?.rating || generatedProblem?.rating || null,
+                p1Result: problemResults.p1[idx] || { attempts: 0, solved: false },
+                p2Result: problemResults.p2[idx] || { attempts: 0, solved: false }
+            };
+            })
+        };
+
+        try {
+            await fetch(`${API_BASE_URL}/api/results`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            resultSubmitted = true;
+        } catch (error) {
+            console.error('Failed to save result:', error);
+        }
+    }
+
+    async function stopBattle(fromServer = false, persistResult = true) {
+        if (!battleActive && resultSubmitted) return;
+
         battleActive = false;
         
         if (timerInterval) {
@@ -1106,10 +1425,12 @@
         }
         
         breakActive = false;
+        queuedNextProblem = null;
+        solveNotificationKeys = new Set();
         breakTimerDiv.style.display = 'none';
         breakIndicator.style.display = 'none';
-        battleStartTime = null;
         breakStartTime = null;
+        clearBattleRuntimeState();
         
         let winner = '';
         if (player1Score > player2Score) {
@@ -1119,6 +1440,18 @@
         } else {
             winner = 'tie';
         }
+
+        if (!matchEndNotificationShown) {
+            const winnerText = winner === 'tie' ? 'Match ended in a tie.' : `Winner: ${winner}`;
+            showDesktopNotification('🏁 Match Ended', winnerText, winner !== 'tie');
+            matchEndNotificationShown = true;
+        }
+
+        if (persistResult) {
+            await submitBattleResult(winner);
+        }
+
+        matchStatusText.textContent = fromServer ? '✅ Blitz ended' : '✅ Blitz ended';
         
         if (winner !== 'tie') {
             winnerHandleSpan.textContent = winner;
@@ -1149,7 +1482,7 @@
     confirmCancel.addEventListener('click', () => {
         if (passwordInput.value === CANCEL_PASSWORD) {
             passwordModal.style.display = 'none';
-            stopBattle();
+            stopBattle(false, false);
             showDesktopNotification('⛔ Game Cancelled', 'Game cancelled by administrator', true);
         } else {
             alert('Incorrect password!');
@@ -1169,12 +1502,12 @@
         if (e.target === passwordModal) {
             passwordModal.style.display = 'none';
         }
-        if (e.target === roomPasswordModal) {
-            roomPasswordModal.style.display = 'none';
-        }
     });
 
     function init() {
+        if (typeof Notification !== 'undefined') {
+            notificationPermission = Notification.permission === 'granted';
+        }
         loadSavedState();
         connectWebSocket();
     }

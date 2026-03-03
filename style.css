@@ -19,6 +19,27 @@ body {
     width: 100%;
 }
 
+.quick-nav {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.quick-nav-btn {
+    background: #1c3144;
+    color: #d8e8ff;
+    text-decoration: none;
+    padding: 8px 14px;
+    border-radius: 30px;
+    border: 1px solid #3e5f7a;
+    font-weight: 600;
+}
+
+.quick-nav-btn:hover {
+    background: #2c4d6d;
+}
+
 .blitz-header {
     display: flex;
     flex-wrap: wrap;
@@ -558,6 +579,25 @@ body {
     transition: 0.1s ease;
 }
 
+.start-battle {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.start-battle input {
+    background: #1f364a;
+    border: 1px solid #4d9eff;
+    color: #eaf4ff;
+    padding: 10px 14px;
+    border-radius: 30px;
+    min-width: 170px;
+}
+
+.start-battle input:disabled {
+    opacity: 0.7;
+}
+
 .start-battle button:active:not(:disabled) {
     transform: translateY(6px);
     box-shadow: 0 2px 0 #1b4f2d, 0 8px 16px black;
@@ -574,6 +614,47 @@ body {
     padding: 22px;
     margin: 20px 0;
     border: 1px solid #34577a;
+}
+
+.validation-section {
+    background: #122a3d;
+    border-radius: 28px;
+    padding: 18px 22px;
+    margin: 16px 0;
+    border: 1px solid #4d9eff;
+}
+
+.room-validation-mini {
+    color: #8ec5ff;
+    text-decoration: none;
+    font-weight: 700;
+    margin-left: 10px;
+}
+
+.room-validation-mini:hover {
+    text-decoration: underline;
+}
+
+.validation-section h2 {
+    color: #ffd966;
+    margin-bottom: 8px;
+}
+
+.validation-problem {
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+    flex-direction: column;
+}
+
+#validationProblemLink {
+    color: #8ec5ff;
+    font-weight: 700;
+}
+
+#validationStatusText {
+    color: #aaccff;
+    font-size: 0.95rem;
 }
 
 .problems-section h2 {
@@ -1007,6 +1088,49 @@ body {
 
 .desktop-notification.winner {
     border-left-color: gold;
+}
+
+.match-countdown-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1800;
+    background: rgba(0, 0, 0, 0.72);
+    display: none;
+    justify-content: center;
+    align-items: center;
+}
+
+.match-countdown-card {
+    background: linear-gradient(145deg, #1a3448, #0f2536);
+    border: 2px solid #4d9eff;
+    border-radius: 34px;
+    padding: 34px 44px;
+    text-align: center;
+    min-width: 300px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+
+.match-countdown-title {
+    color: #c8dfff;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.match-countdown-time {
+    font-size: 5rem;
+    line-height: 1;
+    font-weight: 800;
+    color: #ffd966;
+    text-shadow: 0 0 18px rgba(255, 217, 102, 0.5);
+    margin: 14px 0;
+}
+
+.match-countdown-subtitle {
+    color: #9fc1e8;
+    font-size: 1rem;
 }
 
 @keyframes slideIn {

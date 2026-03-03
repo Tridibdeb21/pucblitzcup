@@ -1,22 +1,26 @@
 [
   {
-    "blitzNumber": 10,
-    "date": "2026-03-02T13:16:03.196Z",
-    "player1": {
-      "handle": "raif_chy",
-      "score": 0,
-      "rank": "Newbie"
-    },
-    "player2": {
-      "handle": "ELSE_IF_TRIDIB21",
-      "score": 0,
-      "rank": "Newbie"
-    },
+    "matchKey": "CJ6KI0-1772488001028",
+    "roomId": "CJ6KI0",
+    "date": "2026-03-02T21:47:40.096Z",
+    "duration": 1,
     "winner": "tie",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "ELSE_IF_TRIDIB21",
+      "score": 0,
+      "rank": "Newbie"
+    },
     "problems": [
       {
+        "name": "Tiling with Hexagons",
+        "url": "https://codeforces.com/problemset/problem/216/A",
         "points": 500,
-        "rating": 800,
+        "rating": 1200,
         "p1Result": {
           "attempts": 0,
           "solved": false
@@ -27,28 +31,69 @@
         }
       }
     ],
-    "duration": 3
+    "blitzNumber": 1
   },
   {
-    "blitzNumber": 11,
-    "date": "2026-03-02T13:37:38.764Z",
+    "matchKey": "GMB6RF-1772488139885",
+    "roomId": "GMB6RF",
+    "date": "2026-03-02T21:49:58.905Z",
+    "duration": 1,
+    "winner": "tie",
     "player1": {
-      "handle": "raif_chy",
-      "score": 500,
-      "rank": ""
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": "Pupil"
     },
     "player2": {
       "handle": "ELSE_IF_TRIDIB21",
       "score": 0,
-      "rank": ""
+      "rank": "Newbie"
     },
-    "winner": "raif_chy",
     "problems": [
       {
+        "name": "Lucky Sum",
+        "url": "https://codeforces.com/problemset/problem/121/A",
         "points": 500,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      }
+    ],
+    "blitzNumber": 2
+  },
+  {
+    "matchKey": "1U6AHV-1772549411486",
+    "roomId": "1U6AHV",
+    "date": "2026-03-03T14:53:10.920Z",
+    "duration": 3,
+    "winner": "mishkatit",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 2,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "problems": [
+      {
+        "id": "1864A",
+        "name": "Increasing and Decreasing",
+        "url": "https://codeforces.com/problemset/problem/1864/A",
+        "contestId": 1864,
+        "index": "A",
+        "points": 2,
         "rating": 800,
         "p1Result": {
-          "attempts": 7,
+          "attempts": 12,
           "solved": true
         },
         "p2Result": {
@@ -57,41 +102,16 @@
         }
       },
       {
-        "points": 500,
+        "id": "1971B",
+        "name": "Different String",
+        "url": "https://codeforces.com/problemset/problem/1971/B",
+        "contestId": 1971,
+        "index": "B",
+        "points": 3,
         "rating": 800,
         "p1Result": {
           "attempts": 0,
           "solved": false
-        },
-        "p2Result": {
-          "attempts": 0,
-          "solved": false
-        }
-      }
-    ],
-    "duration": 4
-  },
-  {
-    "blitzNumber": 12,
-    "date": "2026-03-02T13:52:50.915Z",
-    "player1": {
-      "handle": "raif_chy",
-      "score": 500,
-      "rank": "Newbie"
-    },
-    "player2": {
-      "handle": "ELSE_IF_TRIDIB21",
-      "score": 0,
-      "rank": "Newbie"
-    },
-    "winner": "raif_chy",
-    "problems": [
-      {
-        "points": 500,
-        "rating": 800,
-        "p1Result": {
-          "attempts": 3,
-          "solved": true
         },
         "p2Result": {
           "attempts": 0,
@@ -99,8 +119,81 @@
         }
       },
       {
-        "points": 500,
+        "id": "2152A",
+        "name": "Increase or Smash",
+        "url": "https://codeforces.com/problemset/problem/2152/A",
+        "contestId": 2152,
+        "index": "A",
+        "points": 4,
         "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "1406A",
+        "name": "Subset Mex",
+        "url": "https://codeforces.com/problemset/problem/1406/A",
+        "contestId": 1406,
+        "index": "A",
+        "points": 6,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "1008A",
+        "name": "Romaji",
+        "url": "https://codeforces.com/problemset/problem/1008/A",
+        "contestId": 1008,
+        "index": "A",
+        "points": 8,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "1369B",
+        "name": "AccurateLee",
+        "url": "https://codeforces.com/problemset/problem/1369/B",
+        "contestId": 1369,
+        "index": "B",
+        "points": 10,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "892B",
+        "name": "Wrath",
+        "url": "https://codeforces.com/problemset/problem/892/B",
+        "contestId": 892,
+        "index": "B",
+        "points": 12,
+        "rating": 1200,
         "p1Result": {
           "attempts": 0,
           "solved": false
@@ -111,6 +204,199 @@
         }
       }
     ],
-    "duration": 4
+    "blitzNumber": 3
+  },
+  {
+    "matchKey": "2VSTDI-1772550733318",
+    "roomId": "2VSTDI",
+    "date": "2026-03-03T15:13:13.228Z",
+    "duration": 1,
+    "winner": "tie",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "problems": [
+      {
+        "id": "10A",
+        "name": "Power Consumption Calculation",
+        "url": "https://codeforces.com/problemset/problem/10/A",
+        "contestId": 10,
+        "index": "A",
+        "points": 2,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 2",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 3,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 3",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 4,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 4",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 6,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 5",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 8,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 6",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 7",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      }
+    ],
+    "blitzNumber": 4
+  },
+  {
+    "matchKey": "P6FK1Q-1772551132938",
+    "roomId": "P6FK1Q",
+    "date": "2026-03-03T15:19:52.580Z",
+    "duration": 1,
+    "winner": "tie",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "problems": [
+      {
+        "id": "265B",
+        "name": "Roadside Trees (Simplified Edition)",
+        "url": "https://codeforces.com/problemset/problem/265/B",
+        "contestId": 265,
+        "index": "B",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 2",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false
+        }
+      }
+    ],
+    "blitzNumber": 5
   }
 ]

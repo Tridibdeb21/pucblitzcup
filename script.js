@@ -52,6 +52,7 @@
     let handleVerificationProblem = null;
     let handleVerificationHandle = '';
     let handleVerificationTimer = null;
+    let serverClockOffsetMs = 0;
 
     
     // Track solved problems
@@ -161,6 +162,15 @@
 
     function getUserHandleStorageKey() {
         return 'blitzUserHandle';
+    }
+
+    function syncServerClock(serverNow) {
+        if (typeof serverNow !== 'number' || !Number.isFinite(serverNow)) return;
+        serverClockOffsetMs = serverNow - Date.now();
+    }
+
+    function getSyncedNow() {
+        return Date.now() + serverClockOffsetMs;
     }
 
     function getUserAvatarStorageKey() {
@@ -340,6 +350,8 @@
     }
 
     function handleWebSocketMessage(data) {
+        syncServerClock(data?.serverNow);
+
         switch(data.type) {
             case 'ROOM_CREATED':
                 currentRoom = data.roomId;
@@ -569,7 +581,7 @@
         breakActive = false;
         breakSecondsLeft = 0;
         breakStartTime = null;
-        timeLeftSec = Math.max(0, Math.floor((battleEndsAt - Date.now()) / 1000));
+        timeLeftSec = Math.max(0, Math.floor((battleEndsAt - getSyncedNow()) / 1000));
         problemResults = {
             p1: problems.map(() => ({ attempts: 0, solved: false, pending: false })),
             p2: problems.map(() => ({ attempts: 0, solved: false, pending: false }))
@@ -590,10 +602,10 @@
         });
 
         const breakEndsAtFromLive = Number(liveState.breakEndsAt) || 0;
-        if (breakEndsAtFromLive > Date.now()) {
+        if (breakEndsAtFromLive > getSyncedNow()) {
             breakActive = true;
             breakStartTime = Number(liveState.breakStartsAt) || (breakEndsAtFromLive - 60000);
-            breakSecondsLeft = Math.max(0, Math.ceil((breakEndsAtFromLive - Date.now()) / 1000));
+            breakSecondsLeft = Math.max(0, Math.ceil((breakEndsAtFromLive - getSyncedNow()) / 1000));
         }
 
         const runtimeState = loadBattleRuntimeState();
@@ -1070,7 +1082,7 @@
         }
 
         const renderCountdown = () => {
-            const remaining = Math.max(0, Math.ceil((matchCountdownEndsAt - Date.now()) / 1000));
+            const remaining = Math.max(0, Math.ceil((matchCountdownEndsAt - getSyncedNow()) / 1000));
             if (validationStatusText) {
                 validationStatusText.textContent = `Both participants verified. Match starts in ${remaining}s.`;
             }
@@ -1412,7 +1424,7 @@
             }
             
             if (battleEndsAt) {
-                const now = Date.now();
+                const now = getSyncedNow();
                 const newTimeLeft = Math.max(0, Math.floor((battleEndsAt - now) / 1000));
                 
                 if (newTimeLeft !== timeLeftSec) {
@@ -1426,7 +1438,7 @@
             }
             
             if (breakActive && breakStartTime) {
-                const now = Date.now();
+                const now = getSyncedNow();
                 const elapsedSeconds = Math.floor((now - breakStartTime) / 1000);
                 const newBreakLeft = Math.max(0, 60 - elapsedSeconds);
                 
@@ -1502,7 +1514,7 @@
             apiCheckInterval = null;
         }
 
-        const deadlineMs = battleEndsAt || Date.now();
+        const deadlineMs = battleEndsAt || getSyncedNow();
         matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
 
         try {

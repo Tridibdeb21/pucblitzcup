@@ -99,9 +99,14 @@ function isRoomExpired(room) {
 }
 
 function sendToRoom(room, message) {
+    const payload = {
+        serverNow: Date.now(),
+        ...message
+    };
+
     room.players.forEach(player => {
         if (player.ws && player.ws.readyState === WebSocket.OPEN) {
-            player.ws.send(JSON.stringify(message));
+            player.ws.send(JSON.stringify(payload));
         }
     });
 }
@@ -947,6 +952,7 @@ function handleJoinRoom(ws, data) {
         
         ws.send(JSON.stringify({
             type: 'REJOIN_SUCCESS',
+            serverNow: Date.now(),
             roomId: room.id,
             roomData: getRoomPublicState(room),
             isHost: room.host === data.handle
@@ -982,6 +988,7 @@ function handleJoinRoom(ws, data) {
     
     ws.send(JSON.stringify({
         type: 'ROOM_JOINED',
+        serverNow: Date.now(),
         roomId: room.id,
         roomName: room.name,
         playerIndex: room.players.length - 1,
@@ -1026,6 +1033,7 @@ function handleRejoinRoom(ws, data) {
     
     ws.send(JSON.stringify({
         type: 'REJOIN_SUCCESS',
+        serverNow: Date.now(),
         roomId: room.id,
         roomData: getRoomPublicState(room),
         isHost: room.host === data.handle

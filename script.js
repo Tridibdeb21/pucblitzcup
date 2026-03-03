@@ -767,7 +767,7 @@
 
     // Add problem in create form
     createAddProblemBtn.addEventListener('click', () => {
-        problems.push({ points: 500, rating: 1200 });
+        problems.push({ points: 2, rating: 1200 });
         renderCreateProblems();
     });
 

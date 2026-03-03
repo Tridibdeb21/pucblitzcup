@@ -18,7 +18,7 @@
     const outputContent = document.getElementById('outputContent');
     const savedBracketsList = document.getElementById('savedBracketsList');
     const expandedBracketIds = new Set();
-    const ratingOptions = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600];
+    const ratingOptions = Array.from({ length: 28 }, (_, index) => 800 + (index * 100));
     let bracketProblems = [
         { points: 2, rating: 800 },
         { points: 3, rating: 800 },
@@ -663,7 +663,7 @@
 
     if (bracketAddProblemBtn) {
         bracketAddProblemBtn.addEventListener('click', () => {
-            bracketProblems.push({ points: 500, rating: 1200 });
+            bracketProblems.push({ points: 2, rating: 1200 });
             renderBracketProblems();
         });
     }

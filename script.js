@@ -335,6 +335,7 @@
                 roomData = {
                     id: data.roomId,
                     name: data.roomName,
+                    players: data.players || [],
                     opponentHandle: data.opponentHandle,
                     duration: data.duration,
                     interval: data.interval,
@@ -342,10 +343,20 @@
                     validationProblem: data.validationProblem
                 };
                 joinRoomUI(data.roomId, data.roomName, data.players, data.duration, data.interval, data.problems, data.validationProblem);
-                if (data.countdownInProgress && data.countdownEndsAt) {
+                if (data.battleState && data.battleState.status === 'running') {
+                    restoreBattleState(data.battleState);
+                } else if (data.countdownInProgress && data.countdownEndsAt) {
                     startMatchCountdown(data.countdownEndsAt);
                 }
                 saveState();
+                break;
+
+            case 'PLAYER_JOINED':
+                updateRoomPlayers(data.players || []);
+                if (data.handle) {
+                    const joinedLabel = data.role === 'spectator' ? 'Spectator Joined' : 'Player Joined';
+                    showDesktopNotification(`👋 ${joinedLabel}`, `${data.handle} joined the room`, false, true);
+                }
                 break;
                 
             case 'REJOIN_SUCCESS':
@@ -497,6 +508,7 @@
         stopMatchCountdown();
         player1Handle = state.player1Handle;
         player2Handle = state.player2Handle;
+        const liveState = state.liveState || {};
         const problemConfigs = state.problemConfigs || [];
         selectedProblems = state.selectedProblems || [];
         if (problemConfigs.length > 0) {
@@ -518,9 +530,10 @@
         player1Score = 0;
         player2Score = 0;
         battleActive = true;
-        currentProblemIndex = 0;
-        currentProblem = null;
-        problemLocked = false;
+        const currentProblemNumberFromLive = Number(liveState.currentProblemNumber) || 0;
+        currentProblemIndex = Math.max(0, currentProblemNumberFromLive);
+        currentProblem = liveState.currentProblem || (currentProblemIndex > 0 ? selectedProblems[currentProblemIndex - 1] : null);
+        problemLocked = !!liveState.problemLocked;
         breakActive = false;
         breakSecondsLeft = 0;
         breakStartTime = null;
@@ -529,6 +542,27 @@
             p1: problems.map(() => ({ attempts: 0, solved: false, pending: false })),
             p2: problems.map(() => ({ attempts: 0, solved: false, pending: false }))
         };
+
+        const problemWinners = state.problemWinners || {};
+        Object.entries(problemWinners).forEach(([problemWinnerKey, winnerHandle]) => {
+            const [problemNumberStr] = String(problemWinnerKey).split(':');
+            const problemNumber = Number(problemNumberStr) || 0;
+            if (problemNumber < 1 || problemNumber > problems.length) return;
+
+            const problemPoints = problems[problemNumber - 1]?.points || selectedProblems[problemNumber - 1]?.points || 0;
+            if (winnerHandle === player1Handle) {
+                player1Score += problemPoints;
+            } else if (winnerHandle === player2Handle) {
+                player2Score += problemPoints;
+            }
+        });
+
+        const breakEndsAtFromLive = Number(liveState.breakEndsAt) || 0;
+        if (breakEndsAtFromLive > Date.now()) {
+            breakActive = true;
+            breakStartTime = Number(liveState.breakStartsAt) || (breakEndsAtFromLive - 60000);
+            breakSecondsLeft = Math.max(0, Math.ceil((breakEndsAtFromLive - Date.now()) / 1000));
+        }
 
         const runtimeState = loadBattleRuntimeState();
         if (runtimeState && runtimeState.roomId === currentRoom && runtimeState.matchKey === matchKey) {
@@ -948,6 +982,9 @@
         matchStatusBar.style.display = 'flex';
         leaderboard.style.display = 'block';
         arenaPanel.style.display = 'flex';
+        if (matchStatusBar) {
+            matchStatusBar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     }
 
     async function validateHandle(handle) {

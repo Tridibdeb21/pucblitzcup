@@ -1041,5 +1041,598 @@
       }
     ],
     "blitzNumber": 11
+  },
+  {
+    "matchKey": "UXN4UL-1772555488390",
+    "roomId": "UXN4UL",
+    "date": "2026-03-03T16:33:29.108Z",
+    "duration": 2,
+    "winner": "mishkatit",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 2,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "problems": [
+      {
+        "id": "1671A",
+        "name": "String Building",
+        "url": "https://codeforces.com/problemset/problem/1671/A",
+        "contestId": 1671,
+        "index": "A",
+        "points": 2,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": true,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "910A",
+        "name": "The Way to Home",
+        "url": "https://codeforces.com/problemset/problem/910/A",
+        "contestId": 910,
+        "index": "A",
+        "points": 4,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 3",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 6,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 4",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 8,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 5",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 6",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      }
+    ],
+    "blitzNumber": 12
+  },
+  {
+    "matchKey": "TYJPYE-1772556786069",
+    "roomId": "TYJPYE",
+    "date": "2026-03-03T16:54:06.359Z",
+    "duration": 1,
+    "winner": "tie",
+    "player1": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "player2": {
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": "Pupil"
+    },
+    "problems": [
+      {
+        "id": "1006A",
+        "name": "Adjacent Replacements",
+        "url": "https://codeforces.com/problemset/problem/1006/A",
+        "contestId": 1006,
+        "index": "A",
+        "points": 2,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 2",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 3,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 3",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 4,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 4",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 6,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 5",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 8,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 6",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 7",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      }
+    ],
+    "blitzNumber": 13
+  },
+  {
+    "matchKey": "N133P4-1772557509115",
+    "roomId": "N133P4",
+    "date": "2026-03-03T17:09:10.605Z",
+    "duration": 4,
+    "winner": "mishkatit",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 2,
+      "rank": "Pupil"
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": "Newbie"
+    },
+    "problems": [
+      {
+        "id": "1923A",
+        "name": "Moving Chips",
+        "url": "https://codeforces.com/problemset/problem/1923/A",
+        "contestId": 1923,
+        "index": "A",
+        "points": 2,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": true,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "678A",
+        "name": "Johny Likes Numbers",
+        "url": "https://codeforces.com/problemset/problem/678/A",
+        "contestId": 678,
+        "index": "A",
+        "points": 3,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 3",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 4,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 4",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 6,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 5",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 8,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 6",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 7",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      }
+    ],
+    "blitzNumber": 14
+  },
+  {
+    "matchKey": "K2UE6K-1772558135671",
+    "roomId": null,
+    "date": "2026-03-03T17:18:43.312Z",
+    "duration": 3,
+    "winner": "tie",
+    "player1": {
+      "handle": "mishkatit",
+      "score": 0,
+      "rank": ""
+    },
+    "player2": {
+      "handle": "mitmax",
+      "score": 0,
+      "rank": ""
+    },
+    "problems": [
+      {
+        "id": "1206B",
+        "name": "Make Product Equal One",
+        "url": "https://codeforces.com/problemset/problem/1206/B",
+        "contestId": 1206,
+        "index": "B",
+        "points": 2,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 2",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 3,
+        "rating": 800,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 3",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 4,
+        "rating": 900,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 4",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 6,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 5",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 8,
+        "rating": 1000,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 6",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 10,
+        "rating": 1100,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      },
+      {
+        "id": "",
+        "name": "Problem 7",
+        "url": "",
+        "contestId": null,
+        "index": "",
+        "points": 12,
+        "rating": 1200,
+        "p1Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        },
+        "p2Result": {
+          "attempts": 0,
+          "solved": false,
+          "pending": false
+        }
+      }
+    ],
+    "blitzNumber": 15
   }
 ]

@@ -17,6 +17,7 @@ const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
 const ROOM_NO_OPPONENT_TIMEOUT_MS = 10 * 60 * 1000;
 const MATCH_START_COUNTDOWN_MS = 15 * 1000;
 const ROOM_PENDING_RECHECK_DELAY_MS = 60 * 1000;
+const ROOM_VALIDATION_POLL_MS = 2000;
 
 // Store rooms in memory
 const rooms = new Map();
@@ -1226,7 +1227,7 @@ initResultsFile().then(() => {
         rooms.forEach(room => {
             evaluateRoomValidationAndAutoStart(room).catch(() => {});
         });
-    }, 7000);
+    }, ROOM_VALIDATION_POLL_MS);
 
     server.listen(PORT, () => {
         console.log(`Server running on https://blitzing-2.onrender.com`);

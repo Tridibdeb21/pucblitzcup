@@ -26,7 +26,7 @@
                 <div class="stat-number" id="totalMatches">0</div>
             </div>
             <div class="stat-card">
-                <h3>Most Wins</h3>
+                <h3>Best Win Rate (min 3)</h3>
                 <div class="stat-number" id="mostWins">-</div>
             </div>
             <div class="stat-card">
@@ -147,27 +147,75 @@
             const totalMatches = results.length;
             document.getElementById('totalMatches').textContent = totalMatches;
 
-            if (totalMatches > 0) {
-                const winCount = {};
-                results.forEach(r => {
-                    if (r.winner !== 'tie') {
-                        winCount[r.winner] = (winCount[r.winner] || 0) + 1;
+            const bestWinRateEl = document.getElementById('mostWins');
+            const avgScoreEl = document.getElementById('avgScore');
+
+            if (totalMatches === 0) {
+                bestWinRateEl.textContent = '-';
+                avgScoreEl.textContent = '0';
+                return;
+            }
+
+            const playerStats = {};
+            for (const match of results) {
+                const p1 = match?.player1?.handle;
+                const p2 = match?.player2?.handle;
+
+                if (p1) {
+                    if (!playerStats[p1]) playerStats[p1] = { wins: 0, played: 0 };
+                    playerStats[p1].played += 1;
+                }
+
+                if (p2) {
+                    if (!playerStats[p2]) playerStats[p2] = { wins: 0, played: 0 };
+                    playerStats[p2].played += 1;
+                }
+
+                if (match.winner && match.winner !== 'tie') {
+                    if (!playerStats[match.winner]) {
+                        playerStats[match.winner] = { wins: 0, played: 0 };
                     }
+                    playerStats[match.winner].wins += 1;
+                }
+            }
+
+            const MIN_MATCHES_FOR_RATE = 3;
+            let candidates = Object.entries(playerStats)
+                .map(([handle, stat]) => ({
+                    handle,
+                    wins: stat.wins,
+                    played: stat.played,
+                    rate: stat.played > 0 ? stat.wins / stat.played : 0
+                }))
+                .filter(item => item.played >= MIN_MATCHES_FOR_RATE);
+
+            if (candidates.length === 0) {
+                candidates = Object.entries(playerStats)
+                    .map(([handle, stat]) => ({
+                        handle,
+                        wins: stat.wins,
+                        played: stat.played,
+                        rate: stat.played > 0 ? stat.wins / stat.played : 0
+                    }))
+                    .filter(item => item.played > 0);
+            }
+
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => {
+                    if (b.rate !== a.rate) return b.rate - a.rate;
+                    if (b.played !== a.played) return b.played - a.played;
+                    return b.wins - a.wins;
                 });
 
-                let mostWins = '-';
-                let maxWins = 0;
-                for (const [player, count] of Object.entries(winCount)) {
-                    if (count > maxWins) {
-                        maxWins = count;
-                        mostWins = `${player} (${count})`;
-                    }
-                }
-                document.getElementById('mostWins').textContent = mostWins;
-
-                const avgScore = results.reduce((sum, r) => sum + r.player1.score + r.player2.score, 0) / (totalMatches * 2);
-                document.getElementById('avgScore').textContent = avgScore.toFixed(1);
+                const best = candidates[0];
+                const ratePct = (best.rate * 100).toFixed(1);
+                bestWinRateEl.textContent = `${best.handle} (${ratePct}% · ${best.wins}/${best.played})`;
+            } else {
+                bestWinRateEl.textContent = '-';
             }
+
+            const avgScore = results.reduce((sum, r) => sum + r.player1.score + r.player2.score, 0) / (totalMatches * 2);
+            avgScoreEl.textContent = avgScore.toFixed(1);
         }
 
         function displayResults(results) {

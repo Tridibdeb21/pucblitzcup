@@ -100,6 +100,7 @@
         const confirmAdminPassword = document.getElementById('confirmAdminPassword');
         const cancelAdminPassword = document.getElementById('cancelAdminPassword');
         const focusRoomId = (new URLSearchParams(window.location.search).get('roomId') || '').trim().toUpperCase();
+        let focusedMatchModalOpened = false;
 
         function getRankColor(rank) {
             const colors = {
@@ -243,11 +244,15 @@
                 return new Date(b.date).getTime() - new Date(a.date).getTime();
             });
 
+            let focusedResult = null;
             tbody.innerHTML = orderedResults.map(r => {
                 const date = new Date(r.date);
                 const formattedDate = date.toLocaleDateString();
                 const formattedTime = date.toLocaleTimeString();
                 const rowRoomId = String(r.roomId || '').toUpperCase();
+                if (focusRoomId && rowRoomId === focusRoomId) {
+                    focusedResult = r;
+                }
 
                 return `
                 <tr data-room-id="${rowRoomId}">
@@ -278,6 +283,11 @@
                 if (targetRow) {
                     targetRow.classList.add('focused-result-row');
                     targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    if (!focusedMatchModalOpened && focusedResult) {
+                        focusedMatchModalOpened = true;
+                        showDetails(focusedResult);
+                    }
                 }
             }
         }

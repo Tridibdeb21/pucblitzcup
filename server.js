@@ -31,7 +31,17 @@ app.use(express.static('.'));
 // Initialize results file
 async function initResultsFile() {
     try {
-        await fs.access(RESULTS_FILE);
+        const raw = await fs.readFile(RESULTS_FILE, 'utf8');
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) {
+            await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
+            return;
+        }
+
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) {
+            await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
+        }
     } catch {
         await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
     }
@@ -39,7 +49,17 @@ async function initResultsFile() {
 
 async function initBracketsFile() {
     try {
-        await fs.access(BRACKETS_FILE);
+        const raw = await fs.readFile(BRACKETS_FILE, 'utf8');
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) {
+            await fs.writeFile(BRACKETS_FILE, JSON.stringify([]));
+            return;
+        }
+
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) {
+            await fs.writeFile(BRACKETS_FILE, JSON.stringify([]));
+        }
     } catch {
         await fs.writeFile(BRACKETS_FILE, JSON.stringify([]));
     }
@@ -74,9 +94,15 @@ function ensureSequentialBlitzNumbers(results = []) {
 }
 
 async function readBrackets() {
-    const raw = await fs.readFile(BRACKETS_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    try {
+        const raw = await fs.readFile(BRACKETS_FILE, 'utf8');
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) return [];
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
 }
 
 async function writeBrackets(brackets) {
@@ -468,6 +494,114 @@ function finalizeBattle(room, reason = 'timer') {
     broadcastActiveRooms();
 }
 
+function analyzeServerSubmissionsForProblem(submissionData, problem, deadlineMs = null, minMs = null) {
+    const analysis = {
+        accepted: null,
+        hasPending: false
+    };
+
+    if (!submissionData || submissionData.status !== 'OK' || !Array.isArray(submissionData.result) || !problem) {
+        return analysis;
+    }
+
+    for (const sub of submissionData.result) {
+        if (!sub?.problem) continue;
+        const sameProblem = sub.problem.contestId === problem.contestId && sub.problem.index === problem.index;
+        if (!sameProblem) continue;
+
+        const submitMs = (sub.creationTimeSeconds || 0) * 1000;
+        if (deadlineMs && submitMs && submitMs > deadlineMs) continue;
+        if (minMs && submitMs && submitMs < minMs) continue;
+
+        if (sub.verdict === 'OK') {
+            if (!analysis.accepted || submitMs < analysis.accepted.submitMs) {
+                analysis.accepted = { submitMs, submissionId: sub.id };
+            }
+            continue;
+        }
+
+        if (sub.verdict === null || sub.verdict === undefined || sub.verdict === 'TESTING' || sub.verdict === 'QUEUED') {
+            analysis.hasPending = true;
+        }
+    }
+
+    return analysis;
+}
+
+async function verifyTimerEndSubmissions(room) {
+    if (!room?.battleState || room.battleState.status !== 'running') return;
+
+    const deadlineMs = room.battleState.endsAt;
+    const liveState = room.battleState.liveState || {};
+    const currentProblemNumber = Number(liveState.currentProblemNumber) || 0;
+    const currentProblem = liveState.currentProblem
+        || room.battleState.selectedProblems?.[Math.max(0, currentProblemNumber - 1)]
+        || null;
+
+    if (!currentProblem || !currentProblem.contestId || !currentProblem.index) {
+        finalizeBattle(room, 'timer');
+        return;
+    }
+
+    const p1 = room.battleState.player1Handle;
+    const p2 = room.battleState.player2Handle;
+    const minMs = Number(liveState.updatedAt) || Number(room.battleState.startsAt) || 0;
+
+    const maxWaitMs = 90 * 1000;
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt <= maxWaitMs) {
+        const [p1Data, p2Data] = await Promise.all([
+            fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p1)}&from=1&count=100`),
+            fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p2)}&from=1&count=100`)
+        ]);
+
+        const p1Analysis = analyzeServerSubmissionsForProblem(p1Data, currentProblem, deadlineMs, minMs);
+        const p2Analysis = analyzeServerSubmissionsForProblem(p2Data, currentProblem, deadlineMs, minMs);
+
+        let solverHandle = null;
+        if (p1Analysis.accepted || p2Analysis.accepted) {
+            if (!p2Analysis.accepted || (p1Analysis.accepted && p1Analysis.accepted.submitMs <= p2Analysis.accepted.submitMs)) {
+                solverHandle = p1;
+            } else {
+                solverHandle = p2;
+            }
+        }
+
+        if (solverHandle) {
+            const key = `${currentProblemNumber}:${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}`;
+            if (!room.battleState.problemWinners) room.battleState.problemWinners = {};
+            if (!room.battleState.solveAnnouncements) room.battleState.solveAnnouncements = {};
+
+            if (!room.battleState.problemWinners[key]) {
+                room.battleState.problemWinners[key] = solverHandle;
+                const solveKey = `${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}:${solverHandle}`;
+                room.battleState.solveAnnouncements[solveKey] = true;
+
+                sendToRoom(room, {
+                    type: 'PROBLEM_SOLVED',
+                    roomId: room.id,
+                    solverHandle,
+                    problemId: currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`,
+                    problemNumber: currentProblemNumber,
+                    solveKey
+                });
+            }
+
+            break;
+        }
+
+        const hasPending = p1Analysis.hasPending || p2Analysis.hasPending;
+        if (!hasPending) {
+            break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    finalizeBattle(room, 'timer');
+}
+
 function getRoomPublicState(room) {
     return {
         id: room.id,
@@ -639,7 +773,10 @@ async function startBattleForPair(room, startP1, startP2) {
     room.endTimeout = setTimeout(() => {
         const targetRoom = rooms.get(room.id);
         if (!targetRoom || !targetRoom.battleState) return;
-        finalizeBattle(targetRoom, 'timer');
+        verifyTimerEndSubmissions(targetRoom).catch(error => {
+            console.error('Timer-end submission verification failed:', error);
+            finalizeBattle(targetRoom, 'timer');
+        });
     }, Math.max(0, endsAt - Date.now()));
 
     scheduleRoomCleanup(room);

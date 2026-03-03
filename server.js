@@ -145,6 +145,11 @@ function finalizeBattle(room, reason = 'timer') {
     if (!room || !room.battleState) return;
     if (room.battleState.status === 'ended') return;
 
+    if (room.breakAdvanceTimeout) {
+        clearTimeout(room.breakAdvanceTimeout);
+        room.breakAdvanceTimeout = null;
+    }
+
     const now = Date.now();
     room.battleState.status = 'ended';
     room.battleState.endedAt = now;
@@ -318,6 +323,15 @@ async function startBattleForPair(room, startP1, startP2) {
         generatedProblemLocks: {},
         problemWinners: {},
         solveAnnouncements: {},
+        liveState: {
+            currentProblemNumber: 1,
+            currentProblem: firstProblem,
+            problemLocked: false,
+            solvedBy: null,
+            breakStartsAt: null,
+            breakEndsAt: null,
+            updatedAt: Date.now()
+        },
         duration: room.duration,
         interval: room.interval,
         roomId: room.id
@@ -509,6 +523,11 @@ function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
         room.countdownTimeout = null;
     }
 
+    if (room.breakAdvanceTimeout) {
+        clearTimeout(room.breakAdvanceTimeout);
+        room.breakAdvanceTimeout = null;
+    }
+
     rooms.delete(room.id);
     return true;
 }
@@ -662,7 +681,8 @@ async function handleCreateRoom(ws, data) {
         preGeneratedFirstProblem: null,
         pendingSubmissionActive: false,
         validationCheckInProgress: false,
-        startInProgress: false
+        startInProgress: false,
+        breakAdvanceTimeout: null
     };
     
     rooms.set(roomId, room);
@@ -791,6 +811,45 @@ async function handleProblemSolved(ws, data) {
 
     const totalProblems = (room.battleState.problemConfigs || room.problems || []).length;
     const solvedProblemNumber = Number(problemNumber) || 0;
+    const solvedProblemIndex = solvedProblemNumber - 1;
+    const hasNextProblem = solvedProblemNumber >= 1 && solvedProblemNumber < totalProblems;
+    const now = Date.now();
+
+    room.battleState.liveState = {
+        currentProblemNumber: solvedProblemNumber,
+        currentProblem: room.battleState.selectedProblems?.[solvedProblemIndex] || null,
+        problemLocked: true,
+        solvedBy: solverHandle,
+        breakStartsAt: hasNextProblem ? now : null,
+        breakEndsAt: hasNextProblem ? now + 60000 : null,
+        updatedAt: now
+    };
+
+    if (room.breakAdvanceTimeout) {
+        clearTimeout(room.breakAdvanceTimeout);
+        room.breakAdvanceTimeout = null;
+    }
+
+    if (hasNextProblem) {
+        const nextProblemNumberForLiveState = solvedProblemNumber + 1;
+        room.breakAdvanceTimeout = setTimeout(() => {
+            const targetRoom = rooms.get(room.id);
+            if (!targetRoom || !targetRoom.battleState || targetRoom.battleState.status !== 'running') return;
+
+            const nextProblemIndexForLiveState = nextProblemNumberForLiveState - 1;
+            targetRoom.battleState.liveState = {
+                currentProblemNumber: nextProblemNumberForLiveState,
+                currentProblem: targetRoom.battleState.selectedProblems?.[nextProblemIndexForLiveState] || null,
+                problemLocked: false,
+                solvedBy: null,
+                breakStartsAt: null,
+                breakEndsAt: null,
+                updatedAt: Date.now()
+            };
+            targetRoom.breakAdvanceTimeout = null;
+        }, 60000);
+    }
+
     if (solvedProblemNumber < 1 || solvedProblemNumber >= totalProblems) {
         return;
     }
@@ -899,26 +958,34 @@ function handleJoinRoom(ws, data) {
         clearTimeout(room.noOpponentTimeout);
         room.noOpponentTimeout = null;
     }
-    
-    room.players.forEach((player, index) => {
-        if (player.ws) {
-            player.ws.send(JSON.stringify({
-                type: 'ROOM_JOINED',
-                roomId: room.id,
-                roomName: room.name,
-                playerIndex: index,
-                players: room.players.filter(p => !!p.handle).map(p => p.handle),
-                isHost: room.host === player.handle,
-                opponentHandle: room.opponentHandle,
-                duration: room.duration,
-                interval: room.interval,
-                problems: room.problems,
-                validationProblem: room.validationProblem,
-                countdownInProgress: !!room.countdownInProgress,
-                countdownEndsAt: room.countdownEndsAt || null
-            }));
-        }
+
+    const joinedRole = (data.handle === room.host || data.handle === room.opponentHandle)
+        ? 'player'
+        : 'spectator';
+
+    sendToRoom(room, {
+        type: 'PLAYER_JOINED',
+        handle: data.handle,
+        role: joinedRole,
+        players: room.players.filter(p => !!p.handle).map(p => p.handle)
     });
+    
+    ws.send(JSON.stringify({
+        type: 'ROOM_JOINED',
+        roomId: room.id,
+        roomName: room.name,
+        playerIndex: room.players.length - 1,
+        players: room.players.filter(p => !!p.handle).map(p => p.handle),
+        isHost: room.host === data.handle,
+        opponentHandle: room.opponentHandle,
+        duration: room.duration,
+        interval: room.interval,
+        problems: room.problems,
+        validationProblem: room.validationProblem,
+        battleState: room.battleState,
+        countdownInProgress: !!room.countdownInProgress,
+        countdownEndsAt: room.countdownEndsAt || null
+    }));
 
     evaluateRoomValidationAndAutoStart(room).catch(() => {});
     

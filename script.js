@@ -24,6 +24,7 @@
     let timeLeftSec = 600;
     let checkIntervalSec = 1;
     let currentProblem = null;
+    let currentProblemOpenedAt = null;
     let problemLocked = false;
     let breakActive = false;
     let breakSecondsLeft = 0;
@@ -43,6 +44,11 @@
     let matchEndNotificationShown = false;
     let matchCountdownTimer = null;
     let matchCountdownEndsAt = null;
+    let timerEndVerificationInProgress = false;
+    let endAfterCurrentSolve = false;
+    let activeOSNotifications = [];
+    let pendingSubmissionStatusReported = null;
+
     
     // Track solved problems
     let p1SolvedProblems = new Set();
@@ -143,13 +149,27 @@
     // Rating options
     const ratingOptions = [800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600];
 
+    function getUserHandleStorageKey() {
+        return 'blitzUserHandle';
+    }
+
     // Load saved state
     function loadSavedState() {
+        const persistedHandle = localStorage.getItem(getUserHandleStorageKey()) || '';
+        if (persistedHandle) {
+            userHandle = persistedHandle;
+            playersValidated = true;
+            userHandleInput.value = userHandle;
+            userHandleInput.disabled = true;
+            setHandleBtn.disabled = true;
+            loggedInfo.innerHTML = `👤 ${userHandle}`;
+        }
+
         const saved = localStorage.getItem('blitzRoomState');
         if (saved) {
             try {
                 const state = JSON.parse(saved);
-                userHandle = state.userHandle || '';
+                userHandle = state.userHandle || userHandle;
                 playersValidated = !!userHandle;
                 currentRoom = state.currentRoom || null;
                 isHost = state.isHost || false;
@@ -184,6 +204,9 @@
             roomData
         };
         localStorage.setItem('blitzRoomState', JSON.stringify(state));
+        if (userHandle) {
+            localStorage.setItem(getUserHandleStorageKey(), userHandle);
+        }
     }
 
     function getRuntimeStateKey() {
@@ -199,6 +222,7 @@
             player2Score,
             currentProblemIndex,
             currentProblem,
+            currentProblemOpenedAt,
             problemLocked,
             breakActive,
             breakSecondsLeft,
@@ -370,12 +394,21 @@
                 
             case 'BATTLE_STARTED':
                 stopMatchCountdown();
-                showDesktopNotification('🚀 Match Started', 'Blitz match has started for both players.');
+                showDesktopNotification('🚀 Match Started', 'Blitz match has started for both players.', false, true);
                 startBattleFromHost(data.battleState);
                 break;
 
             case 'MATCH_COUNTDOWN_STARTED':
                 startMatchCountdown(data.startsAt);
+                break;
+
+            case 'VALIDATION_PROBLEM_READY':
+                if (data.roomId === currentRoom && data.validationProblem) {
+                    if (!roomData) roomData = {};
+                    roomData.validationProblem = data.validationProblem;
+                    setValidationProblem(data.validationProblem, roomData.players || []);
+                    saveState();
+                }
                 break;
 
             case 'START_ERROR':
@@ -403,6 +436,10 @@
             }
 
             case 'BATTLE_FINISHED':
+                if (timerEndVerificationInProgress) {
+                    matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
+                    break;
+                }
                 stopBattle(true);
                 break;
 
@@ -410,7 +447,7 @@
                 const solveKey = data.solveKey || `${data.problemId}:${data.solverHandle}`;
                 if (!solveNotificationKeys.has(solveKey)) {
                     solveNotificationKeys.add(solveKey);
-                    showDesktopNotification('✅ Problem Solved!', `${data.solverHandle} solved Problem ${data.problemNumber}!`);
+                    showDesktopNotification('✅ Problem Solved!', `${data.solverHandle} solved Problem ${data.problemNumber}!`, false, true);
                 }
                 break;
             }
@@ -435,7 +472,7 @@
                         queuedNextProblem = data.problem;
                     }
 
-                    showDesktopNotification('🆕 New Problem Ready', `Problem ${nextProblemNumber} generated and ready for next round.`);
+                    showDesktopNotification('🆕 New Problem Ready', `Problem ${nextProblemNumber} generated and ready for next round.`, false, true);
 
                     saveBattleRuntimeState();
                 }
@@ -450,7 +487,6 @@
 
             case 'ROOM_CLOSED':
                 if (data.roomId === currentRoom) {
-                    showDesktopNotification('ℹ️ Blitz Ended', data.message || 'This room has ended and moved to past results.');
                     leaveRoom();
                 }
                 break;
@@ -490,8 +526,8 @@
         breakStartTime = null;
         timeLeftSec = Math.max(0, Math.floor((battleEndsAt - Date.now()) / 1000));
         problemResults = {
-            p1: problems.map(() => ({ attempts: 0, solved: false })),
-            p2: problems.map(() => ({ attempts: 0, solved: false }))
+            p1: problems.map(() => ({ attempts: 0, solved: false, pending: false })),
+            p2: problems.map(() => ({ attempts: 0, solved: false, pending: false }))
         };
 
         const runtimeState = loadBattleRuntimeState();
@@ -500,6 +536,7 @@
             player2Score = runtimeState.player2Score || 0;
             currentProblemIndex = runtimeState.currentProblemIndex || 0;
             currentProblem = runtimeState.currentProblem || null;
+            currentProblemOpenedAt = runtimeState.currentProblemOpenedAt || null;
             problemLocked = !!runtimeState.problemLocked;
             breakActive = !!runtimeState.breakActive;
             breakStartTime = runtimeState.breakStartTime || null;
@@ -755,6 +792,8 @@
 
     // Create room
     createRoomBtn.addEventListener('click', async () => {
+        await ensureNotificationPermission();
+
         if (!userHandle) {
             alert('Please set your handle first');
             return;
@@ -778,12 +817,6 @@
             alert('Opponent handle must be different from your handle');
             return;
         }
-
-        const opponentValid = await validateHandle(opponentHandle);
-        if (!opponentValid) {
-            alert('Given opponent handle does not exist on Codeforces');
-            return;
-        }
         
         ws.send(JSON.stringify({
             type: 'CREATE_ROOM',
@@ -798,6 +831,8 @@
 
     // Join room
     joinRoomBtn.addEventListener('click', () => {
+        ensureNotificationPermission().catch(() => {});
+
         if (!userHandle) {
             alert('Please set your handle first');
             return;
@@ -998,6 +1033,8 @@
             const result = problemResults.p1[index];
             if (result && result.solved) {
                 p1Row += `<td class="problem-cell solved">✓</td>`;
+            } else if (result && result.pending) {
+                p1Row += `<td class="problem-cell">⏳</td>`;
             } else if (result && result.attempts > 0) {
                 p1Row += `<td class="problem-cell attempted">✗</td>`;
             } else {
@@ -1015,6 +1052,8 @@
             const result = problemResults.p2[index];
             if (result && result.solved) {
                 p2Row += `<td class="problem-cell solved">✓</td>`;
+            } else if (result && result.pending) {
+                p2Row += `<td class="problem-cell">⏳</td>`;
             } else if (result && result.attempts > 0) {
                 p2Row += `<td class="problem-cell attempted">✗</td>`;
             } else {
@@ -1052,7 +1091,64 @@
         }
     }
 
-    function showDesktopNotification(title, message, isWinner = false) {
+    async function pushOSNotification(title, message) {
+        if (typeof Notification === 'undefined') {
+            return;
+        }
+
+        if (Notification.permission !== 'granted') {
+            const grantedNow = await ensureNotificationPermission();
+            if (!grantedNow) return;
+        }
+
+        try {
+            const osNotification = new Notification(title, {
+                body: message,
+                tag: `blitz-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                renotify: true,
+                requireInteraction: true,
+                silent: false
+            });
+
+            activeOSNotifications.push(osNotification);
+            osNotification.onclick = () => {
+                window.focus();
+                osNotification.close();
+            };
+
+            osNotification.onclose = () => {
+                activeOSNotifications = activeOSNotifications.filter(item => item !== osNotification);
+            };
+
+            setTimeout(() => {
+                try {
+                    osNotification.close();
+                } catch {}
+            }, 10000);
+            return;
+        } catch (error) {
+            console.warn('Direct Notification API failed, trying service worker path:', error);
+        }
+
+        try {
+            if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+                const registration = await navigator.serviceWorker.getRegistration();
+                if (registration && typeof registration.showNotification === 'function') {
+                    await registration.showNotification(title, {
+                        body: message,
+                        tag: `blitz-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        renotify: true,
+                        silent: false
+                    });
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('Service worker notification path failed:', error);
+        }
+    }
+
+    function showDesktopNotification(title, message, isWinner = false, allowOSNotification = false) {
         const notification = document.createElement('div');
         notification.className = `desktop-notification ${isWinner ? 'winner' : ''}`;
         notification.innerHTML = `
@@ -1064,19 +1160,10 @@
         
         setTimeout(() => notification.remove(), 5000);
 
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            try {
-                const osNotification = new Notification(title, {
-                    body: message,
-                    silent: false
-                });
-                osNotification.onclick = () => {
-                    window.focus();
-                    osNotification.close();
-                };
-            } catch (error) {
-                console.warn('OS notification failed:', error);
-            }
+        if (allowOSNotification) {
+            pushOSNotification(title, message).catch(error => {
+                console.warn('OS notification delivery failed:', error);
+            });
         }
     }
 
@@ -1117,7 +1204,7 @@
                     updateTimerDisplay();
                     
                     if (timeLeftSec <= 0) {
-                        stopBattle(true);
+                        verifyFinalSubmissionsAtTimerEnd();
                     }
                 }
             }
@@ -1140,6 +1227,129 @@
         }, 1000);
     }
 
+    function isPendingVerdict(verdict) {
+        return verdict === null || verdict === undefined || verdict === 'TESTING' || verdict === 'QUEUED';
+    }
+
+    function analyzeSubmissionsForProblem(submissionData, problem, deadlineMs = null, minMs = null) {
+        const analysis = {
+            accepted: null,
+            hasPending: false,
+            hasJudgedFail: false
+        };
+
+        if (!submissionData || submissionData.status !== 'OK' || !Array.isArray(submissionData.result) || !problem) {
+            return analysis;
+        }
+
+        for (const sub of submissionData.result) {
+            if (!sub.problem) continue;
+            const isSameProblem = sub.problem.contestId === problem.contestId && sub.problem.index === problem.index;
+            if (!isSameProblem) continue;
+
+            const submitMs = (sub.creationTimeSeconds || 0) * 1000;
+            if (deadlineMs && submitMs && submitMs > deadlineMs) continue;
+            if (minMs && submitMs && submitMs < minMs) continue;
+
+            if (sub.verdict === 'OK') {
+                if (!analysis.accepted || submitMs < analysis.accepted.submitMs) {
+                    analysis.accepted = { submitMs, submissionId: sub.id };
+                }
+                continue;
+            }
+
+            if (isPendingVerdict(sub.verdict)) {
+                analysis.hasPending = true;
+            } else {
+                analysis.hasJudgedFail = true;
+            }
+        }
+
+        return analysis;
+    }
+
+    function getSubmissionWindowStartMs() {
+        return currentProblemOpenedAt || battleStartTime || 0;
+    }
+
+    async function verifyFinalSubmissionsAtTimerEnd() {
+        if (!battleActive || timerEndVerificationInProgress) return;
+
+        timerEndVerificationInProgress = true;
+        pendingSubmissionStatusReported = null;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        if (apiCheckInterval) {
+            clearInterval(apiCheckInterval);
+            apiCheckInterval = null;
+        }
+
+        const deadlineMs = battleEndsAt || Date.now();
+        matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
+
+        try {
+            while (battleActive && !breakActive && !problemLocked && currentProblem) {
+
+                const [p1Response, p2Response] = await Promise.all([
+                    fetch(`https://codeforces.com/api/user.status?handle=${player1Handle}&from=1&count=100`),
+                    fetch(`https://codeforces.com/api/user.status?handle=${player2Handle}&from=1&count=100`)
+                ]);
+
+                const p1Data = await p1Response.json();
+                const p2Data = await p2Response.json();
+
+                const windowStartMs = getSubmissionWindowStartMs();
+                const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, deadlineMs, windowStartMs);
+                const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, deadlineMs, windowStartMs);
+
+                const p1Accepted = p1Analysis.accepted;
+                const p2Accepted = p2Analysis.accepted;
+
+                if (p1Accepted || p2Accepted) {
+                    reportPendingSubmissionStatus(false);
+                    let solver = 'p1';
+                    if (!p1Accepted) solver = 'p2';
+                    else if (p2Accepted && p2Accepted.submitMs < p1Accepted.submitMs) solver = 'p2';
+
+                    endAfterCurrentSolve = true;
+                    handleSolve(solver);
+                    return;
+                }
+
+                if (!p1Analysis.hasPending && !p2Analysis.hasPending) {
+                    reportPendingSubmissionStatus(false);
+                    break;
+                }
+
+                reportPendingSubmissionStatus(true);
+
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            stopBattle(true);
+        } catch (error) {
+            console.error('Final submission verification failed:', error);
+            stopBattle(true);
+        } finally {
+            reportPendingSubmissionStatus(false);
+            timerEndVerificationInProgress = false;
+        }
+    }
+
+    function reportPendingSubmissionStatus(hasPending) {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !currentRoom) return;
+        if (pendingSubmissionStatusReported === hasPending) return;
+
+        pendingSubmissionStatusReported = hasPending;
+        ws.send(JSON.stringify({
+            type: 'PENDING_SUBMISSION_STATUS',
+            roomId: currentRoom,
+            hasPending: !!hasPending
+        }));
+    }
+
     async function loadNextProblem() {
         if (!battleActive || currentProblemIndex >= problems.length) {
             stopBattle(true);
@@ -1156,6 +1366,7 @@
         const prob = queuedNextProblem;
         if (!prob) {
             currentProblem = null;
+            currentProblemOpenedAt = null;
             problemLocked = false;
             lockStatusDiv.textContent = `⏳ Generating Problem ${currentProblemIndex + 1}/${problems.length}...`;
             lockStatusDiv.className = 'problem-lock-status';
@@ -1164,6 +1375,7 @@
 
         queuedNextProblem = null;
         currentProblem = prob;
+        currentProblemOpenedAt = Date.now();
         currentProblemIndex++;
         
         const problemPoints = selectedProblems[currentProblemIndex - 1]?.points || 500;
@@ -1196,58 +1408,41 @@
             const p2Data = await p2Response.json();
 
             if (!problemResults.p1[currentProblemIndex - 1]) {
-                problemResults.p1[currentProblemIndex - 1] = { attempts: 0, solved: false };
+                problemResults.p1[currentProblemIndex - 1] = { attempts: 0, solved: false, pending: false };
             }
             if (!problemResults.p2[currentProblemIndex - 1]) {
-                problemResults.p2[currentProblemIndex - 1] = { attempts: 0, solved: false };
+                problemResults.p2[currentProblemIndex - 1] = { attempts: 0, solved: false, pending: false };
             }
 
-            const p1Seen = new Set();
-            const p2Seen = new Set();
+            const windowStartMs = getSubmissionWindowStartMs();
+            const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, null, windowStartMs);
+            const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, null, windowStartMs);
 
-            if (p1Data.status === 'OK') {
-                for (let sub of p1Data.result) {
-                    if (sub.problem && 
-                        sub.problem.contestId === currentProblem.contestId && 
-                        sub.problem.index === currentProblem.index) {
-                        
-                        const subId = sub.id;
-                        if (!p1Seen.has(subId)) {
-                            p1Seen.add(subId);
-                            
-                            if (!problemResults.p1[currentProblemIndex - 1].solved) {
-                                problemResults.p1[currentProblemIndex - 1].attempts++;
-                            }
-                            
-                            if (sub.verdict === 'OK' && !problemLocked) {
-                                handleSolve('p1');
-                                break;
-                            }
-                        }
-                    }
+            const p1Result = problemResults.p1[currentProblemIndex - 1];
+            const p2Result = problemResults.p2[currentProblemIndex - 1];
+
+            if (!p1Result.solved) {
+                p1Result.pending = !!p1Analysis.hasPending;
+                if (p1Analysis.hasJudgedFail) {
+                    p1Result.attempts = Math.max(1, p1Result.attempts || 0);
                 }
             }
 
-            if (p2Data.status === 'OK' && !problemLocked) {
-                for (let sub of p2Data.result) {
-                    if (sub.problem && 
-                        sub.problem.contestId === currentProblem.contestId && 
-                        sub.problem.index === currentProblem.index) {
-                        
-                        const subId = sub.id;
-                        if (!p2Seen.has(subId)) {
-                            p2Seen.add(subId);
-                            
-                            if (!problemResults.p2[currentProblemIndex - 1].solved) {
-                                problemResults.p2[currentProblemIndex - 1].attempts++;
-                            }
-                            
-                            if (sub.verdict === 'OK' && !problemLocked) {
-                                handleSolve('p2');
-                                break;
-                            }
-                        }
-                    }
+            if (!p2Result.solved) {
+                p2Result.pending = !!p2Analysis.hasPending;
+                if (p2Analysis.hasJudgedFail) {
+                    p2Result.attempts = Math.max(1, p2Result.attempts || 0);
+                }
+            }
+
+            const p1Accepted = p1Analysis.accepted;
+            const p2Accepted = p2Analysis.accepted;
+
+            if (p1Accepted || p2Accepted) {
+                if (!p2Accepted || (p1Accepted && p1Accepted.submitMs <= p2Accepted.submitMs)) {
+                    handleSolve('p1');
+                } else {
+                    handleSolve('p2');
                 }
             }
 
@@ -1284,7 +1479,7 @@
         const solveKey = `${currentProblem?.id || currentProblemIndex}:${solverHandle}`;
         if (!solveNotificationKeys.has(solveKey)) {
             solveNotificationKeys.add(solveKey);
-            showDesktopNotification('✅ Problem Solved!', `${solverHandle} solved Problem ${currentProblemIndex}!`);
+            showDesktopNotification('✅ Problem Solved!', `${solverHandle} solved Problem ${currentProblemIndex}!`, false, true);
         }
 
         if (ws && ws.readyState === WebSocket.OPEN && currentRoom && currentProblem?.id) {
@@ -1302,6 +1497,13 @@
         lockStatusDiv.classList.add('solved-flash');
         
         updatePlayerUI();
+
+        if (endAfterCurrentSolve) {
+            endAfterCurrentSolve = false;
+            stopBattle(true);
+            saveBattleRuntimeState();
+            return;
+        }
         
         if (currentProblemIndex >= problems.length) {
             lockStatusDiv.textContent = '✅ All problems solved. Ending match now...';
@@ -1391,8 +1593,8 @@
                 index: generatedProblem?.index || '',
                 points: configProblem?.points || generatedProblem?.points || 0,
                 rating: configProblem?.rating || generatedProblem?.rating || null,
-                p1Result: problemResults.p1[idx] || { attempts: 0, solved: false },
-                p2Result: problemResults.p2[idx] || { attempts: 0, solved: false }
+                p1Result: problemResults.p1[idx] || { attempts: 0, solved: false, pending: false },
+                p2Result: problemResults.p2[idx] || { attempts: 0, solved: false, pending: false }
             };
             })
         };
@@ -1413,6 +1615,9 @@
         if (!battleActive && resultSubmitted) return;
 
         battleActive = false;
+        endAfterCurrentSolve = false;
+        timerEndVerificationInProgress = false;
+        reportPendingSubmissionStatus(false);
         
         if (timerInterval) {
             clearInterval(timerInterval);
@@ -1426,6 +1631,7 @@
         
         breakActive = false;
         queuedNextProblem = null;
+        currentProblemOpenedAt = null;
         solveNotificationKeys = new Set();
         breakTimerDiv.style.display = 'none';
         breakIndicator.style.display = 'none';
@@ -1442,8 +1648,10 @@
         }
 
         if (!matchEndNotificationShown) {
-            const winnerText = winner === 'tie' ? 'Match ended in a tie.' : `Winner: ${winner}`;
-            showDesktopNotification('🏁 Match Ended', winnerText, winner !== 'tie');
+            const winnerText = winner === 'tie'
+                ? 'Match ended in a tie. Check Results page.'
+                : `Winner: ${winner}. Check Results page.`;
+            showDesktopNotification('🏁 Match Ended', winnerText, winner !== 'tie', true);
             matchEndNotificationShown = true;
         }
 
@@ -1507,6 +1715,14 @@
     function init() {
         if (typeof Notification !== 'undefined') {
             notificationPermission = Notification.permission === 'granted';
+
+            if (Notification.permission === 'default') {
+                const bootstrapPermission = () => {
+                    ensureNotificationPermission().catch(() => {});
+                    window.removeEventListener('click', bootstrapPermission);
+                };
+                window.addEventListener('click', bootstrapPermission);
+            }
         }
         loadSavedState();
         connectWebSocket();

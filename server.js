@@ -14,6 +14,7 @@ const RESULTS_FILE = path.join(__dirname, 'results.json');
 const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
 const ROOM_NO_OPPONENT_TIMEOUT_MS = 5 * 60 * 1000;
 const MATCH_START_COUNTDOWN_MS = 15 * 1000;
+const ROOM_PENDING_RECHECK_DELAY_MS = 60 * 1000;
 
 // Store rooms in memory
 const rooms = new Map();
@@ -315,6 +316,7 @@ async function startBattleForPair(room, startP1, startP2) {
         usedProblemIds,
         problemConfigs: room.problems,
         generatedProblemLocks: {},
+        problemWinners: {},
         solveAnnouncements: {},
         duration: room.duration,
         interval: room.interval,
@@ -347,6 +349,15 @@ async function evaluateRoomValidationAndAutoStart(room) {
     if (room.battleState && room.battleState.status === 'running') return;
     if (isBattleEnded(room) || isRoomExpired(room)) return;
     if (room.validationCheckInProgress || room.startInProgress || room.countdownInProgress) return;
+
+    if (!room.validationProblem) {
+        broadcastValidationStatus(room, {
+            pair: [],
+            statuses: {},
+            message: 'Validation problem is being generated. Please wait...'
+        });
+        return;
+    }
 
     const { pair, waitMessage } = getAutoStartPair(room);
     if (!pair) {
@@ -467,6 +478,12 @@ function scheduleRoomCleanup(room) {
         const currentRoom = rooms.get(room.id);
         if (!currentRoom) return;
 
+        if (currentRoom.pendingSubmissionActive) {
+            currentRoom.battleState.cleanupAt = Date.now() + ROOM_PENDING_RECHECK_DELAY_MS;
+            scheduleRoomCleanup(currentRoom);
+            return;
+        }
+
         sendToRoom(currentRoom, {
             type: 'ROOM_CLOSED',
             roomId: currentRoom.id,
@@ -558,6 +575,10 @@ wss.on('connection', (ws) => {
                 case 'PROBLEM_SOLVED':
                     await handleProblemSolved(ws, data);
                     break;
+
+                case 'PENDING_SUBMISSION_STATUS':
+                    handlePendingSubmissionStatus(ws, data);
+                    break;
                     
                 case 'GET_ACTIVE_ROOMS':
                     sendActiveRooms(ws);
@@ -615,27 +636,8 @@ async function handleCreateRoom(ws, data) {
         return;
     }
 
-    const opponentValid = await validateHandle(opponentHandle).catch(() => false);
-    if (!opponentValid) {
-        ws.send(JSON.stringify({
-            type: 'CREATE_ERROR',
-            message: 'Given opponent handle does not exist on Codeforces.'
-        }));
-        return;
-    }
-
     const roomId = generateRoomId();
-    let validationProblem;
-
-    try {
-        validationProblem = await generateValidationProblem();
-    } catch (error) {
-        ws.send(JSON.stringify({
-            type: 'CREATE_ERROR',
-            message: 'Could not generate validation problem. Please try again.'
-        }));
-        return;
-    }
+    const validationProblem = null;
     
     const room = {
         id: roomId,
@@ -658,6 +660,7 @@ async function handleCreateRoom(ws, data) {
         countdownEndsAt: null,
         countdownInProgress: false,
         preGeneratedFirstProblem: null,
+        pendingSubmissionActive: false,
         validationCheckInProgress: false,
         startInProgress: false
     };
@@ -691,9 +694,49 @@ async function handleCreateRoom(ws, data) {
         broadcastActiveRooms();
     }, ROOM_NO_OPPONENT_TIMEOUT_MS);
 
+    generateValidationProblem()
+        .then(problem => {
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom || currentRoom.battleState) return;
+
+            currentRoom.validationProblem = problem;
+            sendToRoom(currentRoom, {
+                type: 'VALIDATION_PROBLEM_READY',
+                roomId: currentRoom.id,
+                validationProblem: problem
+            });
+
+            evaluateRoomValidationAndAutoStart(currentRoom).catch(() => {});
+        })
+        .catch(error => {
+            console.error('Validation problem generation failed:', error);
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom) return;
+
+            broadcastValidationStatus(currentRoom, {
+                pair: [],
+                statuses: {},
+                message: 'Validation problem generation failed. Please recreate room.'
+            });
+        });
+
     evaluateRoomValidationAndAutoStart(room).catch(() => {});
     
     broadcastActiveRooms();
+}
+
+function handlePendingSubmissionStatus(ws, data) {
+    const room = rooms.get(data.roomId);
+    if (!room || !room.battleState) return;
+
+    const sender = room.players.find(player => player.ws === ws);
+    if (!sender || !sender.handle) return;
+
+    room.pendingSubmissionActive = !!data.hasPending;
+
+    if (!room.pendingSubmissionActive && room.battleState.status === 'ended') {
+        scheduleRoomCleanup(room);
+    }
 }
 
 function handleEndBattleEarly(ws, data) {
@@ -723,6 +766,15 @@ async function handleProblemSolved(ws, data) {
     if (!room.battleState.solveAnnouncements) {
         room.battleState.solveAnnouncements = {};
     }
+    if (!room.battleState.problemWinners) {
+        room.battleState.problemWinners = {};
+    }
+
+    const problemWinnerKey = `${problemNumber}:${problemId}`;
+    if (room.battleState.problemWinners[problemWinnerKey]) {
+        return;
+    }
+    room.battleState.problemWinners[problemWinnerKey] = solverHandle;
 
     const solveKey = `${problemId}:${solverHandle}`;
     if (room.battleState.solveAnnouncements[solveKey]) return;

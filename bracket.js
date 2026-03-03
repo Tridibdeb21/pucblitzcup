@@ -8,12 +8,45 @@
     const shuffleNamesBtn = document.getElementById('shuffleNamesBtn');
     const shuffledNamesPreview = document.getElementById('shuffledNamesPreview');
     const tournamentName = document.getElementById('tournamentName');
+    const defaultMatchProblems = document.getElementById('defaultMatchProblems');
+    const defaultMatchDuration = document.getElementById('defaultMatchDuration');
+    const defaultMatchInterval = document.getElementById('defaultMatchInterval');
     const outputPanel = document.getElementById('outputPanel');
     const outputTitle = document.getElementById('outputTitle');
     const outputMeta = document.getElementById('outputMeta');
     const outputContent = document.getElementById('outputContent');
     const savedBracketsList = document.getElementById('savedBracketsList');
     const expandedBracketIds = new Set();
+
+    function getBracketRoomConfigFromInputs() {
+        return {
+            problemCount: Math.max(1, Math.min(20, Number(defaultMatchProblems?.value) || 7)),
+            duration: Math.max(2, Math.min(60, Number(defaultMatchDuration?.value) || 40)),
+            interval: Math.max(1, Math.min(10, Number(defaultMatchInterval?.value) || 1))
+        };
+    }
+
+    async function ensureNotificationPermission() {
+        if (!('Notification' in window) || !window.isSecureContext) return;
+        if (Notification.permission === 'default') {
+            try {
+                await Notification.requestPermission();
+            } catch (error) {
+                console.warn('Notification permission request failed:', error);
+            }
+        }
+    }
+
+    function showOsNotification(title, body) {
+        if (!('Notification' in window) || !window.isSecureContext) return;
+        if (Notification.permission !== 'granted') return;
+
+        try {
+            new Notification(title, { body });
+        } catch (error) {
+            console.warn('OS notification failed:', error);
+        }
+    }
 
     function drawConnectionPath(svg, x1, y1, x2, y2) {
         const controlOffset = Math.max(28, (x2 - x1) * 0.45);
@@ -262,7 +295,8 @@
     async function renderBracketPreview(bracket) {
         outputPanel.style.display = 'block';
         outputTitle.textContent = `${bracket.name} · ${String(bracket.type).replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}`;
-        outputMeta.textContent = `${bracket.participants.length} participants · Owner: ${bracket.ownerHandle}`;
+        const roomConfig = bracket.roomConfig || { problemCount: 7, duration: 40, interval: 1 };
+        outputMeta.textContent = `${bracket.participants.length} participants · Owner: ${bracket.ownerHandle} · ${roomConfig.problemCount} problems · ${roomConfig.duration}m · ${roomConfig.interval}s check`;
 
         const ratingsMap = await fetchRatingsMap(getAllConcreteHandles([bracket]));
 
@@ -382,7 +416,7 @@
                             </div>
                         </div>
                         <div class="saved-details" style="display:${isExpanded ? 'block' : 'none'};">
-                            <div class="saved-meta" style="margin-bottom:10px;">${bracket.type} · ${bracket.participants.length} participants · Owner: ${bracket.ownerHandle}</div>
+                            <div class="saved-meta" style="margin-bottom:10px;">${bracket.type} · ${bracket.participants.length} participants · Owner: ${bracket.ownerHandle} · ${(bracket.roomConfig?.problemCount ?? 7)} problems · ${(bracket.roomConfig?.duration ?? 40)}m · ${(bracket.roomConfig?.interval ?? 1)}s check</div>
                             <div class="bracket-tree">${matchesHtml}</div>
                         </div>
                     </div>
@@ -414,7 +448,8 @@
             ownerHandle,
             name: tournamentName.value.trim() || 'Tournament',
             type: getSelectedType(),
-            participants
+            participants,
+            roomConfig: getBracketRoomConfigFromInputs()
         };
 
         const response = await fetch(`${API_BASE_URL}/api/brackets`, {
@@ -468,11 +503,26 @@
             return;
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requesterHandle })
-        });
+        const tryCreate = async (adminPassword = '') => {
+            const headers = { 'Content-Type': 'application/json' };
+            if (adminPassword) headers['x-admin-password'] = adminPassword;
+
+            return fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    requesterHandle,
+                    ...(adminPassword ? { password: adminPassword } : {})
+                })
+            });
+        };
+
+        let response = await tryCreate();
+        if (response.status === 403) {
+            const adminPassword = prompt('Only the two players, bracket creator, or admin can create this room. If admin, enter password:');
+            if (!adminPassword) return;
+            response = await tryCreate(adminPassword);
+        }
 
         const data = await response.json();
         if (!response.ok) {
@@ -481,6 +531,7 @@
         }
 
         const roomId = data.roomId;
+        showOsNotification('Bracket Match Room Ready', `Room ${roomId} created. Redirecting to Arena.`);
         localStorage.setItem('blitzPendingJoinRoomId', roomId);
         window.location.href = 'index.html#roomControls';
     }
@@ -562,6 +613,7 @@
     });
 
     loadBrackets();
+    ensureNotificationPermission();
     window.addEventListener('resize', () => {
         drawAllTreeConnections();
     });

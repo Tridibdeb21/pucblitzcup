@@ -145,6 +145,13 @@ h1 {
     gap: 12px;
 }
 
+.create-options {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+    gap: 8px;
+}
+
 label {
     display: block;
     margin-bottom: 6px;

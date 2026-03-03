@@ -45,6 +45,20 @@
                 <div>
                     <label for="tournamentName">Tournament name</label>
                     <input id="tournamentName" type="text" placeholder="PUC Blitz Cup Finals">
+                    <div class="create-options">
+                        <div>
+                            <label for="defaultMatchProblems">Problems per match</label>
+                            <input id="defaultMatchProblems" type="number" min="1" max="20" value="7" step="1">
+                        </div>
+                        <div>
+                            <label for="defaultMatchDuration">Duration (minutes)</label>
+                            <input id="defaultMatchDuration" type="number" min="2" max="60" value="40" step="1">
+                        </div>
+                        <div>
+                            <label for="defaultMatchInterval">Check interval (seconds)</label>
+                            <input id="defaultMatchInterval" type="number" min="1" max="10" value="1" step="1">
+                        </div>
+                    </div>
                 </div>
                 <div>
                     <label for="participantsInput">Participants (one per line)</label>

@@ -90,6 +90,32 @@ function normalizeParticipants(participants = []) {
     return Array.from(new Set(cleaned));
 }
 
+function normalizeHandle(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function normalizeBracketRoomConfig(rawConfig = {}) {
+    const problemCountRaw = Number(rawConfig.problemCount);
+    const durationRaw = Number(rawConfig.duration);
+    const intervalRaw = Number(rawConfig.interval);
+
+    return {
+        problemCount: Number.isFinite(problemCountRaw) ? Math.max(1, Math.min(20, Math.floor(problemCountRaw))) : 7,
+        duration: Number.isFinite(durationRaw) ? Math.max(2, Math.min(60, Math.floor(durationRaw))) : 40,
+        interval: Number.isFinite(intervalRaw) ? Math.max(1, Math.min(10, Math.floor(intervalRaw))) : 1
+    };
+}
+
+function buildDefaultProblems(problemCount = 7) {
+    const total = Math.max(1, Math.min(20, Math.floor(Number(problemCount) || 7)));
+    const ratings = [800, 800, 900, 1000, 1000, 1100, 1200, 1300, 1400, 1500, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400];
+
+    return Array.from({ length: total }, (_, index) => ({
+        points: index + 2,
+        rating: ratings[index] || ratings[ratings.length - 1]
+    }));
+}
+
 function generateRoundRobinMatches(participants) {
     const players = [...participants];
     if (players.length % 2 !== 0) players.push('BYE');
@@ -205,9 +231,22 @@ function generateBracketMatches(type, participants) {
 }
 
 function canManageBracket(bracket, requesterHandle, adminPassword = '') {
-    const isOwner = requesterHandle && bracket.ownerHandle && requesterHandle === bracket.ownerHandle;
+    const isOwner = normalizeHandle(requesterHandle) && normalizeHandle(bracket?.ownerHandle) && normalizeHandle(requesterHandle) === normalizeHandle(bracket.ownerHandle);
     const isAdmin = isValidAdminPassword(adminPassword || '');
     return isOwner || isAdmin;
+}
+
+function canCreateBracketRoom(bracket, match, requesterHandle, adminPassword = '') {
+    if (isValidAdminPassword(adminPassword || '')) return true;
+
+    const requester = normalizeHandle(requesterHandle);
+    if (!requester) return false;
+
+    const owner = normalizeHandle(bracket?.ownerHandle);
+    const p1 = normalizeHandle(match?.p1);
+    const p2 = normalizeHandle(match?.p2);
+
+    return requester === owner || requester === p1 || requester === p2;
 }
 
 async function resolveTieWinnerByRules(player1Handle, player2Handle) {
@@ -758,27 +797,18 @@ function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     return false;
 }
 
-async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [] }) {
+async function createBracketRoom({ hostHandle, opponentHandle, roomName, duration = 40, interval = 1, problems = [], problemCount = 7 }) {
     const roomId = generateRoomId();
     const validationProblem = null;
     const normalizedProblems = Array.isArray(problems) && problems.length > 0
         ? problems
-        : [
-            { points: 2, rating: 800 },
-            { points: 3, rating: 800 },
-            { points: 4, rating: 900 },
-            { points: 6, rating: 1000 },
-            { points: 8, rating: 1000 },
-            { points: 10, rating: 1100 },
-            { points: 12, rating: 1200 }
-        ];
+        : buildDefaultProblems(problemCount);
 
     const room = {
         id: roomId,
         name: roomName,
         players: [
-            { handle: hostHandle, ws: null },
-            { handle: opponentHandle, ws: null }
+            { handle: hostHandle, ws: null }
         ],
         host: hostHandle,
         opponentHandle,
@@ -802,6 +832,22 @@ async function createBracketRoom({ hostHandle, opponentHandle, roomName, duratio
     };
 
     rooms.set(roomId, room);
+
+    room.noOpponentTimeout = setTimeout(() => {
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom) return;
+        if (currentRoom.battleState) return;
+        if (getAssignedPlayersCount(currentRoom) >= 2) return;
+
+        sendToRoom(currentRoom, {
+            type: 'ROOM_CLOSED',
+            roomId: currentRoom.id,
+            message: 'Room closed: no opponent joined within 10 minutes.'
+        });
+
+        rooms.delete(roomId);
+        broadcastActiveRooms();
+    }, ROOM_NO_OPPONENT_TIMEOUT_MS);
 
     generateValidationProblem()
         .then(problem => {
@@ -1534,6 +1580,7 @@ app.post('/api/brackets', async (req, res) => {
         const ownerHandle = String(body.ownerHandle || '').trim();
         const type = String(body.type || 'round-robin').trim();
         const participants = normalizeParticipants(body.participants || []);
+        const roomConfig = normalizeBracketRoomConfig(body.roomConfig || {});
 
         if (!ownerHandle) {
             res.status(400).json({ error: 'ownerHandle is required' });
@@ -1557,6 +1604,7 @@ app.post('/api/brackets', async (req, res) => {
             type,
             ownerHandle,
             participants,
+            roomConfig,
             matches: generateBracketMatches(type, participants),
             createdAt: new Date().toISOString()
         };
@@ -1612,14 +1660,14 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
         }
 
         const bracket = brackets[bracketIndex];
-        if (!canManageBracket(bracket, requesterHandle, adminPassword)) {
-            res.status(403).json({ error: 'Only bracket creator or admin can create match rooms' });
-            return;
-        }
-
         const match = (bracket.matches || []).find(item => item.id === matchId);
         if (!match) {
             res.status(404).json({ error: 'Match not found' });
+            return;
+        }
+
+        if (!canCreateBracketRoom(bracket, match, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only match players, bracket creator, or admin can create match rooms' });
             return;
         }
 
@@ -1638,13 +1686,16 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
             return;
         }
 
+        const roomConfig = normalizeBracketRoomConfig(bracket.roomConfig || {});
+
         const room = await createBracketRoom({
             hostHandle: match.p1,
             opponentHandle: match.p2,
             roomName: `${bracket.name} · ${match.label} · ${match.p1} vs ${match.p2}`,
-            duration: Number(body.duration) || 40,
-            interval: Number(body.interval) || 1,
-            problems: Array.isArray(body.problems) ? body.problems : []
+            duration: Number(body.duration) || roomConfig.duration,
+            interval: Number(body.interval) || roomConfig.interval,
+            problems: Array.isArray(body.problems) ? body.problems : [],
+            problemCount: Number(body.problemCount) || roomConfig.problemCount
         });
 
         match.roomId = room.id;

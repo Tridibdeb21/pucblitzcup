@@ -250,6 +250,7 @@
             <h1>📊 Blitz Cup Results Archive</h1>
             <div class="header-buttons">
                 <a href="index.html" class="back-btn">← Back to Arena</a>
+                <a href="index.html#activeBlitzSection" class="back-btn">🔥 Active Rooms</a>
                 <button class="clear-btn" id="clearAllBtn">Clear All</button>
             </div>
         </div>
@@ -308,7 +309,10 @@
 
     <script>
         const API_BASE_URL = window.location.origin;
+        const WS_URL = window.location.origin.replace('http', 'ws');
         const CANCEL_PASSWORD = 'PUC103815';
+        let ws = null;
+        let refreshTimer = null;
         
         const modal = document.getElementById('detailModal');
         const modalTitle = document.getElementById('modalTitle');
@@ -349,6 +353,30 @@
             }
         }
 
+        function connectResultsSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'RESULTS_UPDATED') {
+                        loadResults();
+                    }
+                } catch (error) {
+                    console.error('Socket parse error:', error);
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectResultsSocket, 2000);
+            };
+        }
+
+        function startAutoRefresh() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(loadResults, 5000);
+        }
+
         function displayStats(results) {
             const totalMatches = results.length;
             document.getElementById('totalMatches').textContent = totalMatches;
@@ -382,8 +410,15 @@
                 tbody.innerHTML = '<tr><td colspan="8" class="no-data">No results found. Start a blitz match first!</td></tr>';
                 return;
             }
+
+            const orderedResults = [...results].sort((a, b) => {
+                const aNum = Number(a.blitzNumber) || 0;
+                const bNum = Number(b.blitzNumber) || 0;
+                if (bNum !== aNum) return bNum - aNum;
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            });
             
-            tbody.innerHTML = results.reverse().map(r => {
+            tbody.innerHTML = orderedResults.map(r => {
                 const date = new Date(r.date);
                 const formattedDate = date.toLocaleDateString();
                 const formattedTime = date.toLocaleTimeString();
@@ -421,12 +456,19 @@
             
             let problemsHtml = '<h3>Problem Details</h3>';
             result.problems.forEach((p, idx) => {
+                const problemUrl = p.url || (p.contestId && p.index
+                    ? `https://codeforces.com/problemset/problem/${p.contestId}/${p.index}`
+                    : null);
+                const problemTitle = p.name || `Problem ${idx + 1}`;
                 problemsHtml += `
                     <div class="problem-detail">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <strong>Problem ${idx + 1}</strong>
+                            <strong>${problemUrl
+                                ? `<a href="${problemUrl}" target="_blank" style="color:#8ec5ff;text-decoration:none;">${problemTitle}</a>`
+                                : problemTitle}</strong>
                             <span>${p.points} pts | Rating: ${p.rating}</span>
                         </div>
+                        ${problemUrl ? `<div style="margin-bottom:8px;"><a href="${problemUrl}" target="_blank" style="color:#9ac8ff; font-size:0.9rem;">Open problem link</a></div>` : ''}
                         <div style="display: flex; gap: 20px;">
                             <div style="flex: 1;">
                                 <a href="https://codeforces.com/profile/${result.player1.handle}" target="_blank" style="color: ${getRankColor(result.player1.rank)};">
@@ -504,6 +546,8 @@
             }
         });
 
+        connectResultsSocket();
+        startAutoRefresh();
         loadResults();
     </script>
 </body>

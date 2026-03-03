@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,8 +12,9 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 3000;
 const RESULTS_FILE = path.join(__dirname, 'results.json');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ROOM_CLEANUP_DELAY_MS = 5 * 60 * 1000;
-const ROOM_NO_OPPONENT_TIMEOUT_MS = 5 * 60 * 1000;
+const ROOM_NO_OPPONENT_TIMEOUT_MS = 10 * 60 * 1000;
 const MATCH_START_COUNTDOWN_MS = 15 * 1000;
 const ROOM_PENDING_RECHECK_DELAY_MS = 60 * 1000;
 
@@ -101,6 +103,29 @@ function sendToRoom(room, message) {
             player.ws.send(JSON.stringify(message));
         }
     });
+}
+
+function extractAdminPassword(req) {
+    const passwordFromHeader = req.headers['x-admin-password'];
+    if (typeof passwordFromHeader === 'string') {
+        return passwordFromHeader;
+    }
+
+    if (req.body && typeof req.body.password === 'string') {
+        return req.body.password;
+    }
+
+    return '';
+}
+
+function isValidAdminPassword(input) {
+    if (!ADMIN_PASSWORD || typeof input !== 'string') return false;
+
+    const inputBuffer = Buffer.from(input);
+    const adminBuffer = Buffer.from(ADMIN_PASSWORD);
+    if (inputBuffer.length !== adminBuffer.length) return false;
+
+    return crypto.timingSafeEqual(inputBuffer, adminBuffer);
 }
 
 function getFirstTwoConnectedHandles(room) {
@@ -513,23 +538,7 @@ function cleanupUnstartedRoomIfHostLeft(room, leftHandle) {
     if (!room || room.battleState) return false;
     if (leftHandle !== room.host) return false;
 
-    if (room.noOpponentTimeout) {
-        clearTimeout(room.noOpponentTimeout);
-        room.noOpponentTimeout = null;
-    }
-
-    if (room.countdownTimeout) {
-        clearTimeout(room.countdownTimeout);
-        room.countdownTimeout = null;
-    }
-
-    if (room.breakAdvanceTimeout) {
-        clearTimeout(room.breakAdvanceTimeout);
-        room.breakAdvanceTimeout = null;
-    }
-
-    rooms.delete(room.id);
-    return true;
+    return false;
 }
 
 // Broadcast active rooms
@@ -707,7 +716,7 @@ async function handleCreateRoom(ws, data) {
         sendToRoom(currentRoom, {
             type: 'ROOM_CLOSED',
             roomId: currentRoom.id,
-            message: 'Room closed: no opponent joined within 5 minutes.'
+            message: 'Room closed: no opponent joined within 10 minutes.'
         });
 
         rooms.delete(roomId);
@@ -1180,7 +1189,23 @@ app.post('/api/results', async (req, res) => {
     }
 });
 
+app.post('/api/admin/verify', (req, res) => {
+    const suppliedPassword = extractAdminPassword(req);
+    if (!isValidAdminPassword(suppliedPassword)) {
+        res.status(401).json({ error: 'Invalid admin password' });
+        return;
+    }
+
+    res.json({ success: true });
+});
+
 app.delete('/api/results', async (req, res) => {
+    const suppliedPassword = extractAdminPassword(req);
+    if (!isValidAdminPassword(suppliedPassword)) {
+        res.status(401).json({ error: 'Invalid admin password' });
+        return;
+    }
+
     try {
         await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
 

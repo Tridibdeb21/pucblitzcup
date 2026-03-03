@@ -21,12 +21,8 @@
             <span>Realtime Room Battle</span>
         </div>
         <div class="user-panel">
-            <div class="handle-input">
-                <label for="userHandleInput">Handle</label>
-                <input type="text" id="userHandleInput" placeholder="tourist">
-            </div>
-            <button id="setHandleBtn">Set</button>
-            <div id="loggedInfo" class="logged-info">not set</div>
+            <button id="setHandleBtn">Set Handle</button>
+            <div id="loggedInfo" class="logged-info">Not verified</div>
             <a href="results.html" class="results-btn">View Results</a>
         </div>
     </header>
@@ -224,6 +220,26 @@
         <div class="winner-handle" id="winnerHandle"></div>
         <p>Great round.</p>
         <button id="closeCelebration">Play Again</button>
+    </div>
+</div>
+
+<div class="password-modal" id="handleSetupModal">
+    <div class="password-content handle-setup-content">
+        <h2>Set Codeforces Handle</h2>
+        <p>Enter handle, open generated problem, submit one <strong>COMPILATION_ERROR</strong>, then verify.</p>
+        <input type="text" class="password-input" id="userHandleInput" placeholder="tourist">
+        <div class="password-buttons handle-setup-actions">
+            <button class="password-btn" id="generateHandleVerificationBtn">Generate Problem</button>
+            <button class="password-btn cancel-btn" id="closeHandleSetup">Close</button>
+        </div>
+
+        <div class="handle-verification-block" id="handleVerificationBlock" style="display:none;">
+            <a href="#" target="_blank" id="handleVerificationProblemLink">Open generated verification problem</a>
+            <div id="handleVerificationStatus" class="handle-verification-status">Waiting for COMPILATION_ERROR submission...</div>
+            <div class="password-buttons">
+                <button class="password-btn confirm-btn" id="verifyHandleCeBtn">Verify Now</button>
+            </div>
+        </div>
     </div>
 </div>
 

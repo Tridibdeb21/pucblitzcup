@@ -77,7 +77,6 @@
     <script>
         const API_BASE_URL = window.location.origin;
         const WS_URL = window.location.origin.replace('http', 'ws');
-        const CANCEL_PASSWORD = 'PUC103815';
         let ws = null;
         let refreshTimer = null;
 
@@ -273,23 +272,37 @@
         confirmAdminPassword.addEventListener('click', async () => {
             const enteredPassword = adminPasswordInput.value;
 
-            if (enteredPassword === CANCEL_PASSWORD) {
-                adminPasswordModal.style.display = 'none';
+            if (!enteredPassword) {
+                alert('Please enter admin password.');
+                adminPasswordInput.focus();
+                return;
+            }
 
-                if (confirm('Are you sure you want to clear all results? This cannot be undone.')) {
-                    try {
-                        const response = await fetch(`${API_BASE_URL}/api/results`, {
-                            method: 'DELETE'
-                        });
-                        if (response.ok) {
-                            loadResults();
+            if (confirm('Are you sure you want to clear all results? This cannot be undone.')) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/results`, {
+                        method: 'DELETE',
+                        headers: {
+                            'x-admin-password': enteredPassword
                         }
-                    } catch (error) {
-                        console.error('Error clearing results:', error);
+                    });
+
+                    if (response.ok) {
+                        adminPasswordModal.style.display = 'none';
+                        loadResults();
+                        return;
                     }
+
+                    if (response.status === 401) {
+                        alert('Incorrect password.');
+                    } else {
+                        alert('Could not clear results right now.');
+                    }
+                } catch (error) {
+                    console.error('Error clearing results:', error);
+                    alert('Network error while clearing results.');
                 }
-            } else {
-                alert('Incorrect password.');
+
                 adminPasswordInput.value = '';
                 adminPasswordInput.focus();
             }

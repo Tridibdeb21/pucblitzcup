@@ -221,6 +221,54 @@ button:hover,
     padding: 8px 12px;
 }
 
+.logged-info.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-weight: 600;
+}
+
+.logged-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    object-fit: cover;
+}
+
+.handle-setup-content {
+    max-width: 560px;
+    text-align: left;
+}
+
+.handle-setup-actions {
+    justify-content: flex-start;
+}
+
+.handle-verification-block {
+    margin-top: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--panel);
+}
+
+#handleVerificationProblemLink {
+    color: #9dc4ff;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+#handleVerificationProblemLink:hover {
+    text-decoration: underline;
+}
+
+.handle-verification-status {
+    margin-top: 10px;
+    color: var(--muted);
+}
+
 .room-controls {
     display: grid;
     grid-template-columns: 2fr 1fr;

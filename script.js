@@ -48,6 +48,10 @@
     let endAfterCurrentSolve = false;
     let activeOSNotifications = [];
     let pendingSubmissionStatusReported = null;
+    let userAvatarUrl = '';
+    let handleVerificationProblem = null;
+    let handleVerificationHandle = '';
+    let handleVerificationTimer = null;
 
     
     // Track solved problems
@@ -141,8 +145,14 @@
     const notificationCenter = document.getElementById('notificationCenter');
     const matchCountdownOverlay = document.getElementById('matchCountdownOverlay');
     const matchCountdownTime = document.getElementById('matchCountdownTime');
+    const handleSetupModal = document.getElementById('handleSetupModal');
+    const generateHandleVerificationBtn = document.getElementById('generateHandleVerificationBtn');
+    const closeHandleSetup = document.getElementById('closeHandleSetup');
+    const verifyHandleCeBtn = document.getElementById('verifyHandleCeBtn');
+    const handleVerificationBlock = document.getElementById('handleVerificationBlock');
+    const handleVerificationProblemLink = document.getElementById('handleVerificationProblemLink');
+    const handleVerificationStatus = document.getElementById('handleVerificationStatus');
 
-    const CANCEL_PASSWORD = 'PUC103815';
     const API_BASE_URL = window.location.origin;
     const WS_URL = window.location.origin.replace('http', 'ws');
 
@@ -153,16 +163,35 @@
         return 'blitzUserHandle';
     }
 
+    function getUserAvatarStorageKey() {
+        return 'blitzUserAvatar';
+    }
+
+    function renderLoggedInfo() {
+        if (!userHandle) {
+            loggedInfo.classList.remove('user-chip');
+            loggedInfo.textContent = 'Not verified';
+            return;
+        }
+
+        const avatarMarkup = userAvatarUrl
+            ? `<img src="${userAvatarUrl}" alt="${userHandle}" class="logged-avatar">`
+            : '';
+
+        loggedInfo.classList.add('user-chip');
+        loggedInfo.innerHTML = `${avatarMarkup}<span>${userHandle}</span>`;
+    }
+
     // Load saved state
     function loadSavedState() {
         const persistedHandle = localStorage.getItem(getUserHandleStorageKey()) || '';
+        const persistedAvatar = localStorage.getItem(getUserAvatarStorageKey()) || '';
         if (persistedHandle) {
             userHandle = persistedHandle;
+            userAvatarUrl = persistedAvatar;
             playersValidated = true;
             userHandleInput.value = userHandle;
-            userHandleInput.disabled = true;
-            setHandleBtn.disabled = true;
-            loggedInfo.innerHTML = `👤 ${userHandle}`;
+            renderLoggedInfo();
         }
 
         const saved = localStorage.getItem('blitzRoomState');
@@ -170,6 +199,7 @@
             try {
                 const state = JSON.parse(saved);
                 userHandle = state.userHandle || userHandle;
+                userAvatarUrl = state.userAvatarUrl || userAvatarUrl;
                 playersValidated = !!userHandle;
                 currentRoom = state.currentRoom || null;
                 isHost = state.isHost || false;
@@ -177,9 +207,7 @@
                 
                 if (userHandle) {
                     userHandleInput.value = userHandle;
-                    userHandleInput.disabled = true;
-                    setHandleBtn.disabled = true;
-                    loggedInfo.innerHTML = `👤 ${userHandle}`;
+                    renderLoggedInfo();
                 }
                 
                 if (currentRoom && roomData) {
@@ -191,6 +219,8 @@
                 console.error('Error loading state:', e);
             }
         }
+
+        renderLoggedInfo();
         
         renderCreateProblems();
     }
@@ -199,6 +229,7 @@
     function saveState() {
         const state = {
             userHandle,
+            userAvatarUrl,
             currentRoom,
             isHost,
             roomData
@@ -206,6 +237,7 @@
         localStorage.setItem('blitzRoomState', JSON.stringify(state));
         if (userHandle) {
             localStorage.setItem(getUserHandleStorageKey(), userHandle);
+            localStorage.setItem(getUserAvatarStorageKey(), userAvatarUrl || '');
         }
     }
 
@@ -801,27 +833,106 @@
         joinRoomBtn.focus();
     };
 
-    // Set handle
-    setHandleBtn.addEventListener('click', async () => {
+    function stopHandleVerificationPolling() {
+        if (handleVerificationTimer) {
+            clearInterval(handleVerificationTimer);
+            handleVerificationTimer = null;
+        }
+    }
+
+    function closeHandleSetupModal() {
+        stopHandleVerificationPolling();
+        handleSetupModal.style.display = 'none';
+    }
+
+    async function completeHandleSetup(profile) {
+        userHandle = profile.handle;
+        userAvatarUrl = profile.avatar || '';
+        playersValidated = true;
+        userHandleInput.value = profile.handle;
+        renderLoggedInfo();
+        await ensureNotificationPermission();
+        saveState();
+        closeHandleSetupModal();
+        showDesktopNotification('✅ Handle Verified', `${profile.handle} verified successfully`);
+    }
+
+    async function verifyHandleCompilationErrorNow() {
+        if (!handleVerificationHandle || !handleVerificationProblem) {
+            return;
+        }
+
+        handleVerificationStatus.textContent = 'Checking Codeforces submissions...';
+        const passed = await hasCompilationErrorOnProblem(handleVerificationHandle, handleVerificationProblem);
+        if (passed) {
+            const profile = await fetchUserProfile(handleVerificationHandle);
+            if (profile) {
+                await completeHandleSetup(profile);
+                return;
+            }
+        }
+
+        handleVerificationStatus.textContent = 'Not found yet. Submit COMPILATION_ERROR on the generated problem and verify again.';
+    }
+
+    async function startHandleVerificationFlow() {
         const handle = userHandleInput.value.trim();
         if (!handle) {
             alert('Please enter a handle');
             return;
         }
-        
-        const isValid = await validateHandle(handle);
-        if (!isValid) {
+
+        const profile = await fetchUserProfile(handle);
+        if (!profile) {
             alert('Invalid Codeforces handle');
             return;
         }
-        
-        userHandle = handle;
-        playersValidated = true;
-        loggedInfo.innerHTML = `👤 ${handle}`;
-        userHandleInput.disabled = true;
-        setHandleBtn.disabled = true;
-        await ensureNotificationPermission();
-        saveState();
+
+        const problem = await generateHandleVerificationProblem();
+        if (!problem) {
+            alert('Could not generate verification problem right now. Please try again.');
+            return;
+        }
+
+        handleVerificationHandle = profile.handle;
+        handleVerificationProblem = problem;
+        handleVerificationProblemLink.href = problem.url;
+        handleVerificationProblemLink.textContent = `${problem.name} · ${problem.rating}`;
+        handleVerificationBlock.style.display = 'block';
+        handleVerificationStatus.textContent = `Submit COMPILATION_ERROR on this problem from @${profile.handle}. Auto-checking every 5s...`;
+
+        stopHandleVerificationPolling();
+        handleVerificationTimer = setInterval(() => {
+            verifyHandleCompilationErrorNow().catch(() => {});
+        }, 5000);
+    }
+
+    setHandleBtn.addEventListener('click', () => {
+        userHandleInput.value = userHandle || '';
+        handleVerificationProblem = null;
+        handleVerificationHandle = '';
+        handleVerificationBlock.style.display = 'none';
+        handleVerificationProblemLink.href = '#';
+        handleVerificationStatus.textContent = 'Waiting for COMPILATION_ERROR submission...';
+        handleSetupModal.style.display = 'flex';
+        userHandleInput.focus();
+    });
+
+    generateHandleVerificationBtn.addEventListener('click', () => {
+        startHandleVerificationFlow().catch(error => {
+            console.error('Handle verification flow failed:', error);
+            alert('Could not start handle verification right now.');
+        });
+    });
+
+    verifyHandleCeBtn.addEventListener('click', () => {
+        verifyHandleCompilationErrorNow().catch(error => {
+            console.error('Manual CE verification failed:', error);
+        });
+    });
+
+    closeHandleSetup.addEventListener('click', () => {
+        closeHandleSetupModal();
     });
 
     // Create room
@@ -987,11 +1098,79 @@
         }
     }
 
-    async function validateHandle(handle) {
+    async function fetchUserProfile(handle) {
         try {
-            const response = await fetch(`https://codeforces.com/api/user.info?handles=${handle}`);
+            const response = await fetch(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
             const data = await response.json();
-            return data.status === 'OK';
+            if (data.status !== 'OK' || !Array.isArray(data.result) || !data.result[0]) {
+                return null;
+            }
+
+            const user = data.result[0];
+            return {
+                handle: user.handle,
+                avatar: user.titlePhoto || ''
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    async function generateHandleVerificationProblem() {
+        try {
+            const response = await fetch('https://codeforces.com/api/problemset.problems?tags=implementation');
+            const data = await response.json();
+            if (data.status !== 'OK' || !data.result || !Array.isArray(data.result.problems)) {
+                return null;
+            }
+
+            const pool = data.result.problems.filter(problem =>
+                problem.contestId &&
+                problem.index &&
+                problem.rating &&
+                problem.rating >= 800 &&
+                problem.rating <= 1500
+            );
+
+            if (pool.length === 0) {
+                return null;
+            }
+
+            const selected = pool[Math.floor(Math.random() * pool.length)];
+            return {
+                contestId: selected.contestId,
+                index: selected.index,
+                name: selected.name,
+                rating: selected.rating,
+                url: `https://codeforces.com/problemset/problem/${selected.contestId}/${selected.index}`,
+                generatedAtSec: Math.floor(Date.now() / 1000)
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    async function hasCompilationErrorOnProblem(handle, problem) {
+        if (!handle || !problem) return false;
+
+        try {
+            const response = await fetch(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=200`);
+            const data = await response.json();
+            if (data.status !== 'OK' || !Array.isArray(data.result)) {
+                return false;
+            }
+
+            return data.result.some(submission => {
+                if (!submission?.problem) return false;
+
+                const sameProblem = submission.problem.contestId === problem.contestId
+                    && submission.problem.index === problem.index;
+                const afterGenerated = (submission.creationTimeSeconds || 0) >= (problem.generatedAtSec || 0);
+
+                return sameProblem
+                    && afterGenerated
+                    && submission.verdict === 'COMPILATION_ERROR';
+            });
         } catch {
             return false;
         }
@@ -1724,14 +1903,38 @@
         passwordInput.focus();
     });
 
-    confirmCancel.addEventListener('click', () => {
-        if (passwordInput.value === CANCEL_PASSWORD) {
+    confirmCancel.addEventListener('click', async () => {
+        const enteredPassword = passwordInput.value;
+
+        if (!enteredPassword) {
+            alert('Please enter admin password');
+            passwordInput.focus();
+            return;
+        }
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/admin/verify`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-admin-password': enteredPassword
+                },
+                body: JSON.stringify({ password: enteredPassword })
+            });
+
+            if (!response.ok) {
+                alert('Incorrect password!');
+                passwordInput.value = '';
+                passwordInput.focus();
+                return;
+            }
+
             passwordModal.style.display = 'none';
             stopBattle(false, false);
             showDesktopNotification('⛔ Game Cancelled', 'Game cancelled by administrator', true);
-        } else {
-            alert('Incorrect password!');
-            passwordInput.value = '';
+        } catch (error) {
+            console.error('Admin verification failed:', error);
+            alert('Could not verify admin password right now');
         }
     });
 
@@ -1746,6 +1949,9 @@
     window.addEventListener('click', (e) => {
         if (e.target === passwordModal) {
             passwordModal.style.display = 'none';
+        }
+        if (e.target === handleSetupModal) {
+            closeHandleSetupModal();
         }
     });
 

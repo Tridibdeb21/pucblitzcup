@@ -1547,7 +1547,8 @@ async function generateValidationProblem() {
         index: chosen.index,
         name: chosen.name,
         rating: chosen.rating,
-        url: `https://codeforces.com/problemset/problem/${chosen.contestId}/${chosen.index}`
+        url: `https://codeforces.com/problemset/problem/${chosen.contestId}/${chosen.index}`,
+        generatedAtSec: Math.floor(Date.now() / 1000)
     };
 }
 
@@ -1791,14 +1792,16 @@ async function evaluateRoomValidationAndAutoStart(room) {
     }
 
     const [p1, p2] = pair;
+    const minValidationCeTimeSec = Number(room?.validationProblem?.generatedAtSec)
+        || Math.floor((Number(room?.createdAt) || Date.now()) / 1000);
 
     room.validationCheckInProgress = true;
     try {
         const [validP1, validP2, p1HasCE, p2HasCE] = await Promise.all([
             validateHandle(p1),
             validateHandle(p2),
-            hasCompilationErrorOnProblem(p1, room.validationProblem),
-            hasCompilationErrorOnProblem(p2, room.validationProblem)
+            hasCompilationErrorOnProblem(p1, room.validationProblem, minValidationCeTimeSec),
+            hasCompilationErrorOnProblem(p2, room.validationProblem, minValidationCeTimeSec)
         ]);
 
         const statuses = {

@@ -227,6 +227,94 @@
             return `<span class="result-problem-status status-none"><span class="result-problem-status-main">—</span></span>`;
         }
 
+        function buildLeaderboardProblemCell(resultEntry) {
+            const result = normalizeProblemResultEntry(resultEntry);
+
+            if (result.solved) {
+                const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
+                const solveTimeHtml = Number.isFinite(result.solvedAtSec)
+                    ? `<div class="problem-cell-sub">${formatElapsedTime(result.solvedAtSec)}</div>`
+                    : '';
+                return `<td class="problem-cell status-ac"><div class="problem-cell-main">${acLabel}</div>${solveTimeHtml}</td>`;
+            }
+
+            if (result.pending) {
+                return `<td class="problem-cell status-pending"><div class="problem-cell-main pending-main">?<span class="pending-loader" aria-hidden="true"></span></div></td>`;
+            }
+
+            if (result.attempts > 0) {
+                return `<td class="problem-cell status-wa"><div class="problem-cell-main">-${result.attempts}</div></td>`;
+            }
+
+            return `<td class="problem-cell status-none"><div class="problem-cell-main">—</div></td>`;
+        }
+
+        function buildResultLeaderboardMarkup(result) {
+            const problems = Array.isArray(result?.problems) ? result.problems : [];
+
+            const p1Handle = String(result?.player1?.handle || 'Player 1');
+            const p2Handle = String(result?.player2?.handle || 'Player 2');
+            const p1Rank = String(result?.player1?.rank || 'Unrated');
+            const p2Rank = String(result?.player2?.rank || 'Unrated');
+            const p1Score = Number(result?.player1?.score) || 0;
+            const p2Score = Number(result?.player2?.score) || 0;
+
+            const headerCells = problems.map((problem, index) => {
+                const points = Number(problem?.points) || 0;
+                const problemUrl = problem?.url || (problem?.contestId && problem?.index
+                    ? `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`
+                    : '');
+                const problemName = String(problem?.name || `Problem ${index + 1}`);
+                const problemLabel = problemUrl
+                    ? `<a href="${problemUrl}" target="_blank" rel="noopener noreferrer" class="problem-link" title="${problemName}">P${index + 1}</a>`
+                    : `P${index + 1}`;
+                return `<th>${problemLabel}<br><small>${points}pts</small></th>`;
+            }).join('');
+
+            const p1Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p1Result)).join('');
+            const p2Cells = problems.map(problem => buildLeaderboardProblemCell(problem?.p2Result)).join('');
+
+            const standing = getStandingFromResult(result);
+            const p1Standing = standing.label === 'P1' ? '#1' : standing.label === 'P2' ? '#2' : '#1';
+            const p2Standing = standing.label === 'P2' ? '#1' : standing.label === 'P1' ? '#2' : '#1';
+
+            return `
+                <h3 class="modal-subtitle">Leaderboard</h3>
+                <div class="result-leaderboard-wrap">
+                    <table class="leaderboard-table result-leaderboard-table">
+                        <thead>
+                            <tr>
+                                <th>Player</th>
+                                <th>Rank</th>
+                                <th>Total</th>
+                                ${headerCells}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <a href="https://codeforces.com/profile/${encodeURIComponent(p1Handle)}" target="_blank" rel="noopener noreferrer" class="player-link" style="color: ${getRankColor(p1Rank)};"><strong>${p1Handle}</strong></a>
+                                    <div class="leaderboard-cf-rank" style="color: ${getRankColor(p1Rank)};">${p1Rank}</div>
+                                </td>
+                                <td><span class="leaderboard-standing">${p1Standing}</span></td>
+                                <td><strong class="result-total-score">${p1Score}</strong></td>
+                                ${p1Cells}
+                            </tr>
+                            <tr>
+                                <td>
+                                    <a href="https://codeforces.com/profile/${encodeURIComponent(p2Handle)}" target="_blank" rel="noopener noreferrer" class="player-link" style="color: ${getRankColor(p2Rank)};"><strong>${p2Handle}</strong></a>
+                                    <div class="leaderboard-cf-rank" style="color: ${getRankColor(p2Rank)};">${p2Rank}</div>
+                                </td>
+                                <td><span class="leaderboard-standing">${p2Standing}</span></td>
+                                <td><strong class="result-total-score">${p2Score}</strong></td>
+                                ${p2Cells}
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
         async function loadResults() {
             try {
                 const response = await fetch(`${API_BASE_URL}/api/results`);
@@ -489,7 +577,29 @@
                     focusedResult = r;
                 }
 
-                const standing = getStandingFromResult(r);
+                const winnerRaw = String(r?.winner || '').trim();
+                const winnerNorm = winnerRaw.toLowerCase();
+                const p1Norm = String(r?.player1?.handle || '').toLowerCase();
+                const p2Norm = String(r?.player2?.handle || '').toLowerCase();
+
+                let winnerHtml = '<span class="standing-badge standing-none">—</span>';
+                if (winnerNorm === 'tie') {
+                    winnerHtml = '<span class="standing-badge standing-tie">TIE</span>';
+                } else if (winnerNorm && winnerNorm === p1Norm) {
+                    winnerHtml = `
+                        <a href="#" data-handle="${r.player1.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(r.player1.rank)};">
+                            ${r.player1.handle}
+                        </a>
+                    `;
+                } else if (winnerNorm && winnerNorm === p2Norm) {
+                    winnerHtml = `
+                        <a href="#" data-handle="${r.player2.handle}" class="player-link stats-user-link winner" style="color: ${getRankColor(r.player2.rank)};">
+                            ${r.player2.handle}
+                        </a>
+                    `;
+                } else if (winnerRaw) {
+                    winnerHtml = `<span class="winner">${winnerRaw}</span>`;
+                }
 
                 return `
                 <tr data-room-id="${rowRoomId}">
@@ -510,7 +620,7 @@
                         </a>
                     </td>
                     <td><strong>${r.player2.score}</strong></td>
-                    <td><span class="standing-badge ${standing.className}">${standing.label}</span></td>
+                    <td>${winnerHtml}</td>
                     <td><button class="details-btn" onclick='showDetails(${JSON.stringify(r).replace(/'/g, "\\'")})'>View</button></td>
                 </tr>
             `}).join('');
@@ -534,56 +644,21 @@
 
             const date = new Date(result.date);
             const formattedDateTime = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-            const standing = getStandingFromResult(result);
+            const winnerHandle = String(result?.winner || '').trim();
+            const winnerIsTie = winnerHandle.toLowerCase() === 'tie' || !winnerHandle;
+            const winnerMarkup = winnerIsTie
+                ? '<span class="standing-badge standing-tie">TIE</span>'
+                : `<a href="https://codeforces.com/profile/${encodeURIComponent(winnerHandle)}" target="_blank" rel="noopener noreferrer" class="player-link winner">${winnerHandle}</a>`;
             const spectators = Array.isArray(result.spectators) ? result.spectators.filter(Boolean) : [];
             const spectatorsText = spectators.length ? spectators.join(', ') : 'No spectators recorded';
-
-            let problemsHtml = '<h3 class="modal-subtitle">Problem Details</h3>';
-            result.problems.forEach((p, idx) => {
-                const problemUrl = p.url || (p.contestId && p.index
-                    ? `https://codeforces.com/problemset/problem/${p.contestId}/${p.index}`
-                    : null);
-                const problemTitle = p.name || `Problem ${idx + 1}`;
-                const p1Link = problemUrl
-                    ? `<a href="${problemUrl}" target="_blank" class="problem-link">P1</a>`
-                    : 'P1';
-                const p2Link = problemUrl
-                    ? `<a href="${problemUrl}" target="_blank" class="problem-link">P2</a>`
-                    : 'P2';
-                problemsHtml += `
-                    <div class="problem-detail">
-                        <div class="problem-detail-top">
-                            <strong>${problemUrl
-                                ? `<a href="${problemUrl}" target="_blank" class="problem-link">${problemTitle}</a>`
-                                : problemTitle}</strong>
-                            <span>${p.points} pts · Rating ${p.rating}</span>
-                        </div>
-                        <div class="problem-players">
-                            <div>
-                                ${p1Link}
-                                <a href="#" data-handle="${result.player1.handle}" class="stats-user-link problem-player-handle" style="color: ${getRankColor(result.player1.rank)};">
-                                    (${result.player1.handle})
-                                </a>
-                                ${buildProblemStatusMarkup(p.p1Result)}
-                            </div>
-                            <div>
-                                ${p2Link}
-                                <a href="#" data-handle="${result.player2.handle}" class="stats-user-link problem-player-handle" style="color: ${getRankColor(result.player2.rank)};">
-                                    (${result.player2.handle})
-                                </a>
-                                ${buildProblemStatusMarkup(p.p2Result)}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            });
+            const leaderboardHtml = buildResultLeaderboardMarkup(result);
 
             modalContent.innerHTML = `
                 <p><strong>Date & Time:</strong> ${formattedDateTime}</p>
                 <p><strong>Duration:</strong> ${result.duration} minutes</p>
-                <p><strong>Standing:</strong> <span class="standing-badge ${standing.className}">${standing.label}</span></p>
+                <p><strong>Winner:</strong> ${winnerMarkup}</p>
                 <p><strong>Spectators:</strong> ${spectatorsText}</p>
-                ${problemsHtml}
+                ${leaderboardHtml}
             `;
 
             modal.style.display = 'flex';

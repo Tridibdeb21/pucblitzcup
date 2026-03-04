@@ -338,9 +338,9 @@ body {
 }
 
 .standing-p2 {
-    color: #8df0ba;
-    background: rgba(70, 211, 140, 0.15);
-    border-color: rgba(70, 211, 140, 0.34);
+    color: #73d7a3;
+    background: rgba(70, 211, 140, 0.1);
+    border-color: rgba(70, 211, 140, 0.24);
 }
 
 .standing-tie {
@@ -400,6 +400,113 @@ body {
 .modal-subtitle {
     margin: 14px 0 8px;
     font-size: 1rem;
+}
+
+.result-leaderboard-wrap {
+    margin-top: 8px;
+    overflow: auto;
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    min-width: 560px;
+}
+
+.leaderboard-table th {
+    background: #151d2b;
+    color: var(--muted);
+    text-transform: uppercase;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    padding: 10px;
+    text-align: center;
+}
+
+.leaderboard-table td {
+    padding: 10px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    background: #121925;
+}
+
+.leaderboard-table .problem-cell {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    min-width: 62px;
+    background: transparent;
+}
+
+.leaderboard-cf-rank {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    opacity: 0.88;
+}
+
+.leaderboard-standing {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: #1b2434;
+    border: 1px solid var(--border);
+    font-weight: 700;
+    font-size: 0.8rem;
+}
+
+.leaderboard-table .problem-cell-main {
+    font-weight: 700;
+    line-height: 1;
+}
+
+.leaderboard-table .problem-cell-sub {
+    margin-top: 3px;
+    font-size: 0.72rem;
+    color: #d6deeb;
+}
+
+.leaderboard-table .status-ac {
+    color: #00c853;
+    background: transparent;
+}
+
+.leaderboard-table .status-wa {
+    color: #8ea8ff;
+    background: transparent;
+}
+
+.leaderboard-table .status-pending {
+    color: #ffd98b;
+    background: transparent;
+}
+
+.leaderboard-table .status-none {
+    color: var(--muted);
+    background: transparent;
+}
+
+.leaderboard-table .pending-main {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.leaderboard-table .pending-loader {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    border: 2px solid rgba(74, 52, 4, 0.25);
+    border-top-color: #7d5a07;
+    animation: resultPendingSpin 0.85s linear infinite;
+}
+
+.result-total-score {
+    color: #ffd966;
 }
 
 .problem-detail {

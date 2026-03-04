@@ -985,6 +985,7 @@ button:disabled {
 .leaderboard-table .problem-cell {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     min-width: 62px;
+    background: transparent;
 }
 
 .leaderboard-cf-rank {
@@ -1012,28 +1013,29 @@ button:disabled {
 }
 
 .leaderboard-table .problem-cell-sub {
-    margin-top: 4px;
-    font-size: 0.7rem;
-    color: var(--muted);
+    margin-top: 3px;
+    font-size: 0.72rem;
+    color: #d6deeb;
 }
 
 .leaderboard-table .status-ac {
-    color: #1c3a2d;
-    background: linear-gradient(180deg, #c7f7da 0%, #b0f0ca 100%);
+    color: #00c853;
+    background: transparent;
 }
 
 .leaderboard-table .status-wa {
-    color: #4b1318;
-    background: linear-gradient(180deg, #ffd2d6 0%, #ffbcc3 100%);
+    color: #8ea8ff;
+    background: transparent;
 }
 
 .leaderboard-table .status-pending {
-    color: #4a3404;
-    background: linear-gradient(180deg, #ffeebf 0%, #ffe39a 100%);
+    color: #ffd98b;
+    background: transparent;
 }
 
 .leaderboard-table .status-none {
     color: var(--muted);
+    background: transparent;
 }
 
 .leaderboard-table .pending-main {

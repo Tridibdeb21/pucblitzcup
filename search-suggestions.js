@@ -68,7 +68,19 @@
         }
     }
 
-    function buildSuggestions(results, brackets) {
+    async function fetchProfiles() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/profiles`);
+            const data = await response.json();
+            return Array.isArray(data)
+                ? data.map(item => String(item || '').trim()).filter(Boolean)
+                : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function buildSuggestions(results, brackets, profiles) {
         const handles = [];
         const roomIds = [];
         const names = [];
@@ -85,6 +97,10 @@
             if (Array.isArray(bracket?.participants)) {
                 bracket.participants.forEach(handle => handles.push(String(handle || '').trim()));
             }
+        }
+
+        if (Array.isArray(profiles)) {
+            profiles.forEach(handle => handles.push(String(handle || '').trim()));
         }
 
         return {
@@ -282,11 +298,12 @@
         if (!hasAnyTarget) return;
 
         try {
-            const [results, brackets] = await Promise.all([
+            const [results, brackets, profiles] = await Promise.all([
                 fetchResults(),
-                fetchBrackets()
+                fetchBrackets(),
+                fetchProfiles()
             ]);
-            const suggestions = buildSuggestions(results, brackets);
+            const suggestions = buildSuggestions(results, brackets, profiles);
 
             const handleList = ensureDatalist('siteHandleSuggestions');
             fillDatalist(handleList, suggestions.handles);

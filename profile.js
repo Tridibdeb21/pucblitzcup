@@ -1,7 +1,7 @@
 (function () {
     const API_BASE_URL = window.location.origin;
-    const STORAGE_ENC_PREFIX = 'enc:v1:';
-    const STORAGE_ENC_SECRET = 'blitz_storage_v1';
+    const STORAGE_ENC_PREFIX = '654654HiBoss86GJHG&^%ikusehffkGHJG57634rghJGHnHGg827JHG364^%$^$#:';
+    const STORAGE_ENC_SECRET = 'BNYUG&5sKJHKJ@)*%jhf&$%dfjhbJYftg73^3#-)sefkh&^%sfdh';
 
     const profileHandleInput = document.getElementById('profileHandleInput');
     const openProfileBtn = document.getElementById('openProfileBtn');
@@ -285,6 +285,10 @@
             : formatLastSeenLikeCodeforces(presence?.lastSeen);
         const statusClass = presence?.active ? 'status-active' : 'status-offline';
         const canLogout = !!getStoredHandle();
+        const selfHandle = String(getStoredHandle() || '').trim();
+        const h2hUrl = selfHandle && selfHandle.toLowerCase() !== String(handle).toLowerCase()
+            ? `headtohead.html?h1=${encodeURIComponent(selfHandle)}&h2=${encodeURIComponent(handle)}`
+            : `headtohead.html?h1=${encodeURIComponent(handle)}`;
 
         const opponentsHtml = stats.opponents.length
             ? stats.opponents.slice(0, 8).map(item => `<a href="/${encodeURIComponent(item.handle)}" class="user-stats-handle">${item.handle}</a> (${item.count})`).join(', ')
@@ -298,7 +302,7 @@
                 return `
                     <li class="user-recent-item">
                         <span class="user-recent-outcome ${outcomeClass}">${item.outcome}</span>
-                        <span>vs ${item.opponent || 'Unknown'}</span>
+                        <span class="user-recent-opponent">vs ${item.opponent || 'Unknown'}</span>
                         <span class="user-recent-score">${item.ownScore} - ${item.oppScore}</span>
                         <a class="user-recent-link" href="${roomHref}" target="_blank" rel="noopener noreferrer">${dateText}</a>
                     </li>
@@ -308,15 +312,15 @@
 
         profileBody.innerHTML = `
             <div class="user-profile-head">
-                <div class="user-profile-head-main">
-                    ${avatar ? `<img src="${avatar}" alt="${handle}" class="user-profile-avatar">` : ''}
-                    <div>
+                ${avatar ? `<img src="${avatar}" alt="${handle}" class="user-profile-avatar">` : ''}
+                <div class="user-profile-head-info">
+                    <div class="user-profile-handle-row">
                         <div class="user-profile-handle ${handleRankClass}">${handle}</div>
-                        <div class="user-presence ${statusClass}"><span class="presence-dot"></span>${statusText}</div>
-                        <div class="user-profile-rank">${rank} · max ${maxRank}</div>
+                        ${canLogout ? '<button type="button" class="user-profile-logout-btn" data-profile-logout="1">Logout</button>' : ''}
                     </div>
+                    <div class="user-presence ${statusClass}"><span class="presence-dot"></span>${statusText}</div>
+                    <div class="user-profile-rank">${rank} · max ${maxRank}</div>
                 </div>
-                ${canLogout ? '<button type="button" class="user-profile-logout-btn tiny" data-profile-logout="1">Logout</button>' : ''}
             </div>
             <div class="user-profile-grid">
                 <div class="user-profile-item"><span>Rating</span><strong>${rating}</strong></div>
@@ -326,7 +330,8 @@
             </div>
             <div class="user-profile-links">
                 <a href="${cfUrl}" target="_blank" rel="noopener noreferrer">CF Profile</a>
-                <a href="${historyUrl}" target="_blank" rel="noopener noreferrer">Match History</a>
+                <a href="${historyUrl}" target="_blank" rel="noopener noreferrer">History</a>
+                <a href="${h2hUrl}" target="_blank" rel="noopener noreferrer">Head-to-Head</a>
             </div>
             <div class="user-profile-site">
                 <h4>PUC Blitz Stats</h4>
@@ -336,12 +341,16 @@
                     <div class="user-profile-item"><span>Losses</span><strong>${stats.losses}</strong></div>
                     <div class="user-profile-item"><span>Ties</span><strong>${stats.ties}</strong></div>
                     <div class="user-profile-item"><span>Win Rate</span><strong>${stats.winRate}%</strong></div>
+                    <div class="user-profile-item"><span>Avg Score</span><strong>${stats.avgScore}</strong></div>
                     <div class="user-profile-item"><span>Streak</span><strong>${stats.streak}</strong></div>
                 </div>
                 <div style="margin-top:8px;"><span style="color:var(--muted); font-size:0.82rem;">Played with:</span> ${opponentsHtml}</div>
                 <div class="user-recent-wrap">
                     <div class="user-recent-title">Recent 5 Matches</div>
                     <ul class="user-recent-list">${recentHtml}</ul>
+                </div>
+                <div style="margin-top:10px;">
+                    <a class="user-stats-handle" href="${historyUrl}" target="_blank" rel="noopener noreferrer">View played match history</a>
                 </div>
             </div>
         `;
@@ -406,6 +415,9 @@
         const logoutBtn = event.target.closest('[data-profile-logout]');
         if (!logoutBtn) return;
         event.preventDefault();
+        if (!window.confirm('Are you sure you want to logout?')) {
+            return;
+        }
         logoutCurrentSession().catch(() => {});
     });
 

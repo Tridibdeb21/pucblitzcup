@@ -337,6 +337,60 @@ function getAllProfiles() {
         .sort((a, b) => a.localeCompare(b));
 }
 
+function splitIntoChunks(items, chunkSize) {
+    const size = Math.max(1, Number(chunkSize) || 1);
+    const chunks = [];
+    for (let index = 0; index < items.length; index += size) {
+        chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
+}
+
+async function refreshProfilesCanonicalCasing() {
+    const knownHandles = Object.values(profilesMap)
+        .map(item => String(item || '').trim())
+        .filter(Boolean);
+    if (!knownHandles.length) return false;
+
+    const deduped = [];
+    const seen = new Set();
+    for (const handle of knownHandles) {
+        const normalized = normalizeHandle(handle);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        deduped.push(handle);
+    }
+
+    if (!deduped.length) return false;
+
+    let changed = false;
+    const chunks = splitIntoChunks(deduped, 80);
+
+    for (const chunk of chunks) {
+        try {
+            const handlesQuery = chunk.map(handle => encodeURIComponent(handle)).join(';');
+            const data = await fetchJson(`https://codeforces.com/api/user.info?handles=${handlesQuery}`);
+            if (data.status !== 'OK' || !Array.isArray(data.result)) continue;
+
+            for (const user of data.result) {
+                const canonical = String(user?.handle || '').trim();
+                const normalized = normalizeHandle(canonical);
+                if (!normalized || !profilesMap[normalized]) continue;
+                if (profilesMap[normalized] === canonical) continue;
+                profilesMap[normalized] = canonical;
+                changed = true;
+            }
+        } catch {
+        }
+    }
+
+    if (changed) {
+        await saveProfilesFile();
+    }
+
+    return changed;
+}
+
 function markHandleSeen(handle, timestamp = Date.now()) {
     const normalized = normalizeHandle(handle);
     if (!normalized) return;
@@ -1004,14 +1058,15 @@ function clearSessionCookie(res) {
 }
 
 function createServerSession(handle) {
-    const normalizedHandle = normalizeHandle(handle);
+    const canonicalHandle = String(handle || '').trim();
+    const normalizedHandle = normalizeHandle(canonicalHandle);
     if (!normalizedHandle) return null;
 
     const now = Date.now();
     const sessionId = crypto.randomBytes(32).toString('hex');
     const entry = {
         id: sessionId,
-        handle: normalizedHandle,
+        handle: canonicalHandle,
         createdAt: now,
         expiresAt: now + SESSION_MAX_AGE_MS
     };
@@ -1049,14 +1104,15 @@ function cleanupExpiredSessions() {
 }
 
 function createSessionChallenge(handle, problem) {
-    const normalizedHandle = normalizeHandle(handle);
+    const canonicalHandle = String(handle || '').trim();
+    const normalizedHandle = normalizeHandle(canonicalHandle);
     if (!normalizedHandle || !problem || !problem.contestId || !problem.index) return null;
 
     const issuedAtMs = Date.now();
     const id = crypto.randomBytes(24).toString('hex');
     const entry = {
         id,
-        handle: normalizedHandle,
+        handle: canonicalHandle,
         issuedAtMs,
         issuedAtSec: Math.floor(issuedAtMs / 1000),
         expiresAtMs: issuedAtMs + SESSION_CHALLENGE_TTL_MS,
@@ -1416,9 +1472,21 @@ async function fetchJson(url) {
     return response.json();
 }
 
+async function fetchCodeforcesUserProfile(handle) {
+    const cleanHandle = String(handle || '').trim();
+    if (!cleanHandle) return null;
+
+    const data = await fetchJson(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(cleanHandle)}`);
+    if (data.status !== 'OK' || !Array.isArray(data.result) || !data.result[0]) {
+        return null;
+    }
+
+    return data.result[0];
+}
+
 async function validateHandle(handle) {
-    const data = await fetchJson(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(handle)}`);
-    return data.status === 'OK';
+    const profile = await fetchCodeforcesUserProfile(handle);
+    return !!profile;
 }
 
 async function hasCompilationErrorOnProblem(handle, validationProblem, minCreationTimeSec = 0) {
@@ -2560,7 +2628,11 @@ app.get('/api/presence/:handle', (req, res) => {
     res.json(getHandlePresence(handle));
 });
 
-app.get('/api/profiles', (req, res) => {
+app.get('/api/profiles', async (req, res) => {
+    try {
+        await refreshProfilesCanonicalCasing();
+    } catch {
+    }
     res.json(getAllProfiles());
 });
 
@@ -2607,20 +2679,26 @@ app.get('/api/session/me', (req, res) => {
 
 app.post('/api/session/challenge', async (req, res) => {
     try {
-        const handle = normalizeHandle(req.body?.handle || '');
-        if (!handle) {
+        const requestedHandle = String(req.body?.handle || '').trim();
+        if (!requestedHandle) {
             res.status(400).json({ error: 'handle is required' });
             return;
         }
 
-        const handleValid = await validateHandle(handle);
-        if (!handleValid) {
+        const profile = await fetchCodeforcesUserProfile(requestedHandle);
+        if (!profile) {
+            res.status(400).json({ error: 'Invalid Codeforces handle' });
+            return;
+        }
+
+        const canonicalHandle = String(profile.handle || '').trim();
+        if (!canonicalHandle) {
             res.status(400).json({ error: 'Invalid Codeforces handle' });
             return;
         }
 
         const problem = await generateValidationProblem();
-        const challenge = createSessionChallenge(handle, problem);
+        const challenge = createSessionChallenge(canonicalHandle, problem);
         if (!challenge) {
             res.status(500).json({ error: 'Could not create verification challenge' });
             return;
@@ -2639,8 +2717,8 @@ app.post('/api/session/challenge', async (req, res) => {
 
 app.post('/api/session/login', async (req, res) => {
     try {
-        const handle = normalizeHandle(req.body?.handle || '');
-        if (!handle) {
+        const requestedHandle = String(req.body?.handle || '').trim();
+        if (!requestedHandle) {
             res.status(400).json({ error: 'handle is required' });
             return;
         }
@@ -2657,18 +2735,24 @@ app.post('/api/session/login', async (req, res) => {
             return;
         }
 
-        if (normalizeHandle(challenge.handle) !== handle) {
+        if (normalizeHandle(challenge.handle) !== normalizeHandle(requestedHandle)) {
             res.status(401).json({ error: 'Handle does not match verification challenge' });
             return;
         }
 
-        const handleValid = await validateHandle(handle);
-        if (!handleValid) {
+        const profile = await fetchCodeforcesUserProfile(requestedHandle);
+        if (!profile) {
             res.status(400).json({ error: 'Invalid Codeforces handle' });
             return;
         }
 
-        const verified = await hasCompilationErrorOnProblem(handle, challenge.problem, challenge.issuedAtSec);
+        const canonicalHandle = String(profile.handle || '').trim();
+        if (!canonicalHandle || normalizeHandle(canonicalHandle) !== normalizeHandle(challenge.handle)) {
+            res.status(401).json({ error: 'Handle does not match verification challenge' });
+            return;
+        }
+
+        const verified = await hasCompilationErrorOnProblem(challenge.handle, challenge.problem, challenge.issuedAtSec);
         if (!verified) {
             res.status(401).json({ error: 'Handle verification not found for the selected problem' });
             return;
@@ -2677,13 +2761,13 @@ app.post('/api/session/login', async (req, res) => {
         consumeSessionChallenge(challengeId);
 
         destroyServerSession(req);
-        const session = createServerSession(handle);
+        const session = createServerSession(challenge.handle);
         if (!session) {
             res.status(500).json({ error: 'Could not create session' });
             return;
         }
 
-        upsertProfileHandle(handle);
+        upsertProfileHandle(challenge.handle);
         setSessionCookie(res, session.id);
         res.json({ success: true, handle: session.handle, expiresAt: session.expiresAt });
     } catch (error) {

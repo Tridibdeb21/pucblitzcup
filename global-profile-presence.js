@@ -360,6 +360,9 @@
         });
 
         logoutBtn.addEventListener('click', () => {
+            if (!window.confirm('Are you sure you want to logout?')) {
+                return;
+            }
             logoutServerSession().catch(() => {});
             clearAuthSessionStorage();
             globalProfileModal.style.display = 'none';

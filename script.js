@@ -2067,6 +2067,9 @@
         userProfileBody.addEventListener('click', (event) => {
             const logoutBtn = event.target.closest('[data-logout-handle]');
             if (logoutBtn) {
+                if (!window.confirm('Are you sure you want to logout?')) {
+                    return;
+                }
                 logoutCurrentUser();
                 return;
             }

@@ -29,12 +29,16 @@ const ROOM_VALIDATION_POLL_MS = 2000;
 const LAST_SEEN_FILE = path.join(__dirname, 'last_seen.json');
 const PROFILES_FILE = path.join(__dirname, 'profiles.json');
 const PRESENCE_HEARTBEAT_ACTIVE_MS = 70 * 1000;
+const SESSION_COOKIE_NAME = 'blitz_sid';
+const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_SECRET = process.env.BLITZ_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // Store rooms in memory
 const rooms = new Map();
 let lastSeenMap = {};
 const heartbeatSeenMap = new Map();
 let profilesMap = {};
+const sessionStore = new Map();
 
 // Middleware
 app.use(cors());
@@ -92,13 +96,58 @@ function normalizeFeedbackStatus(value) {
     return 'open';
 }
 
+function normalizeFeedbackReplyShape(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const message = String(value.message || '').trim();
+    if (!message) {
+        return null;
+    }
+
+    const createdAtRaw = String(value.createdAt || '').trim();
+    return {
+        id: String(value.id || `fr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim(),
+        message,
+        createdBy: String(value.createdBy || '').trim() || 'anonymous',
+        createdAt: createdAtRaw || new Date().toISOString()
+    };
+}
+
+function normalizeFeedbackItemShape(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const createdAtRaw = String(value.createdAt || '').trim();
+    return {
+        id: String(value.id || `fb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`).trim(),
+        title: String(value.title || '').trim() || 'Untitled Feedback',
+        message: String(value.message || '').trim(),
+        status: normalizeFeedbackStatus(value.status),
+        createdBy: String(value.createdBy || '').trim() || 'unknown',
+        createdAt: createdAtRaw || new Date().toISOString(),
+        updatedBy: value.updatedBy == null ? null : (String(value.updatedBy || '').trim() || null),
+        updatedAt: value.updatedAt == null ? null : (String(value.updatedAt || '').trim() || null),
+        history: Array.isArray(value.history) ? value.history : [],
+        replies: Array.isArray(value.replies)
+            ? value.replies.map(normalizeFeedbackReplyShape).filter(Boolean)
+            : []
+    };
+}
+
 function normalizeFeedbackStoreShape(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         return getEmptyFeedbackStore();
     }
 
+    const normalizedItems = Array.isArray(value.items)
+        ? value.items.map(normalizeFeedbackItemShape).filter(item => item && item.message)
+        : [];
+
     return {
-        items: Array.isArray(value.items) ? value.items : [],
+        items: normalizedItems,
         activity: Array.isArray(value.activity) ? value.activity : []
     };
 }
@@ -114,7 +163,7 @@ async function initFeedbackFile() {
 
         const parsed = JSON.parse(trimmed);
         const normalized = normalizeFeedbackStoreShape(parsed);
-        if (!Array.isArray(parsed?.items) || !Array.isArray(parsed?.activity)) {
+        if (JSON.stringify(parsed) !== JSON.stringify(normalized)) {
             await fs.writeFile(FEEDBACK_FILE, JSON.stringify(normalized, null, 2));
         }
     } catch {
@@ -163,6 +212,14 @@ function canManageFeedback(feedbackItem, requesterHandle, adminPassword = '') {
     const isOwner = !!owner && !!requester && owner === requester;
     const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
     return isOwner || isAdmin;
+}
+
+function canDeleteFeedbackReply(replyItem, requesterHandle, adminPassword = '') {
+    const replyOwner = normalizeHandle(replyItem?.createdBy);
+    const requester = normalizeHandle(requesterHandle);
+    const isReplyOwner = !!replyOwner && !!requester && replyOwner === requester;
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
+    return isReplyOwner || isAdmin;
 }
 
 async function initLastSeenFile() {
@@ -843,21 +900,151 @@ function extractAdminPassword(req) {
     return '';
 }
 
+function parseCookieHeader(cookieHeader) {
+    const source = typeof cookieHeader === 'string' ? cookieHeader : '';
+    if (!source.trim()) return {};
+
+    const parsed = {};
+    source.split(';').forEach(pair => {
+        const idx = pair.indexOf('=');
+        if (idx === -1) return;
+        const key = pair.slice(0, idx).trim();
+        if (!key) return;
+        const value = pair.slice(idx + 1).trim();
+        try {
+            parsed[key] = decodeURIComponent(value);
+        } catch {
+            parsed[key] = value;
+        }
+    });
+    return parsed;
+}
+
+function areEqualSafe(a, b) {
+    const left = Buffer.from(String(a || ''), 'utf8');
+    const right = Buffer.from(String(b || ''), 'utf8');
+    if (left.length !== right.length) return false;
+    return crypto.timingSafeEqual(left, right);
+}
+
+function signSessionId(sessionId) {
+    return crypto
+        .createHmac('sha256', SESSION_SECRET)
+        .update(String(sessionId || ''))
+        .digest('hex');
+}
+
+function createSessionCookieValue(sessionId) {
+    const id = String(sessionId || '').trim();
+    if (!id) return '';
+    return `${id}.${signSessionId(id)}`;
+}
+
+function shouldUseSecureCookies() {
+    const flag = String(process.env.BLITZ_SECURE_COOKIES || '').trim().toLowerCase();
+    if (!flag) return false;
+    return flag === '1' || flag === 'true' || flag === 'yes';
+}
+
+function readSessionIdFromRequest(req) {
+    const cookies = parseCookieHeader(req.headers?.cookie || '');
+    const raw = String(cookies[SESSION_COOKIE_NAME] || '').trim();
+    if (!raw) return '';
+
+    const dot = raw.lastIndexOf('.');
+    if (dot <= 0) return '';
+
+    const sessionId = raw.slice(0, dot);
+    const providedSig = raw.slice(dot + 1);
+    const expectedSig = signSessionId(sessionId);
+    if (!areEqualSafe(providedSig, expectedSig)) return '';
+    return sessionId;
+}
+
+function setSessionCookie(res, sessionId, maxAgeMs = SESSION_MAX_AGE_MS) {
+    const cookieValue = createSessionCookieValue(sessionId);
+    if (!cookieValue) return;
+
+    const maxAge = Math.max(0, Number(maxAgeMs) || 0);
+    const parts = [
+        `${SESSION_COOKIE_NAME}=${encodeURIComponent(cookieValue)}`,
+        'Path=/',
+        'HttpOnly',
+        'SameSite=Lax',
+        `Max-Age=${Math.floor(maxAge / 1000)}`
+    ];
+
+    if (shouldUseSecureCookies()) {
+        parts.push('Secure');
+    }
+
+    res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function clearSessionCookie(res) {
+    const parts = [
+        `${SESSION_COOKIE_NAME}=`,
+        'Path=/',
+        'HttpOnly',
+        'SameSite=Lax',
+        'Max-Age=0'
+    ];
+
+    if (shouldUseSecureCookies()) {
+        parts.push('Secure');
+    }
+
+    res.setHeader('Set-Cookie', parts.join('; '));
+}
+
+function createServerSession(handle) {
+    const normalizedHandle = normalizeHandle(handle);
+    if (!normalizedHandle) return null;
+
+    const now = Date.now();
+    const sessionId = crypto.randomBytes(32).toString('hex');
+    const entry = {
+        id: sessionId,
+        handle: normalizedHandle,
+        createdAt: now,
+        expiresAt: now + SESSION_MAX_AGE_MS
+    };
+    sessionStore.set(sessionId, entry);
+    return entry;
+}
+
+function getServerSession(req) {
+    const sessionId = readSessionIdFromRequest(req);
+    if (!sessionId) return null;
+
+    const entry = sessionStore.get(sessionId);
+    if (!entry) return null;
+    if (Date.now() > Number(entry.expiresAt || 0)) {
+        sessionStore.delete(sessionId);
+        return null;
+    }
+
+    return entry;
+}
+
+function destroyServerSession(req) {
+    const sessionId = readSessionIdFromRequest(req);
+    if (!sessionId) return;
+    sessionStore.delete(sessionId);
+}
+
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    for (const [sid, entry] of sessionStore.entries()) {
+        if (now > Number(entry?.expiresAt || 0)) {
+            sessionStore.delete(sid);
+        }
+    }
+}
+
 function extractRequesterHandle(req) {
-    const fromHeader = req.headers['x-requester-handle'];
-    if (typeof fromHeader === 'string' && fromHeader.trim()) {
-        return fromHeader.trim();
-    }
-
-    if (req.body && typeof req.body.requesterHandle === 'string' && req.body.requesterHandle.trim()) {
-        return req.body.requesterHandle.trim();
-    }
-
-    if (req.query && typeof req.query.requesterHandle === 'string' && req.query.requesterHandle.trim()) {
-        return req.query.requesterHandle.trim();
-    }
-
-    return '';
+    const session = getServerSession(req);
+    return session?.handle || '';
 }
 
 function hashAdminToken(value, salt) {
@@ -1180,6 +1367,82 @@ async function generateRoomProblemForConfig(configProblem = {}, excludedIds = []
     return generated[0];
 }
 
+async function ensureFirstProblemReady(room) {
+    if (!room || !Array.isArray(room.problems) || room.problems.length === 0) return;
+
+    const existingLive = room?.battleState?.selectedProblems?.[0];
+    if (existingLive) return;
+    if (room.preGeneratedFirstProblem) return;
+    if (room.firstProblemGenerationInProgress) return;
+
+    room.firstProblemGenerationInProgress = true;
+    try {
+        const excludedIds = Array.from(new Set([
+            ...(room.validationProblem ? [room.validationProblem.id] : []),
+            ...((Array.isArray(room.bracketExcludedProblemIds) ? room.bracketExcludedProblemIds : []).map(id => String(id || '').trim()).filter(Boolean))
+        ]));
+
+        const usedProblemIds = Array.isArray(room?.battleState?.usedProblemIds)
+            ? room.battleState.usedProblemIds
+            : [];
+        const generated = await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, [...excludedIds, ...usedProblemIds]);
+
+        const targetRoom = rooms.get(room.id);
+        if (!targetRoom) return;
+
+        if (targetRoom.battleState && targetRoom.battleState.status === 'running') {
+            if (!Array.isArray(targetRoom.battleState.selectedProblems)) {
+                targetRoom.battleState.selectedProblems = Array.from({ length: targetRoom.problems.length }, () => null);
+            }
+
+            if (!targetRoom.battleState.selectedProblems[0]) {
+                targetRoom.battleState.selectedProblems[0] = generated;
+
+                if (!Array.isArray(targetRoom.battleState.usedProblemIds)) {
+                    targetRoom.battleState.usedProblemIds = [];
+                }
+                if (!targetRoom.battleState.usedProblemIds.includes(generated.id)) {
+                    targetRoom.battleState.usedProblemIds.push(generated.id);
+                }
+
+                if (targetRoom.bracketId) {
+                    await reserveBracketProblemIds(targetRoom.bracketId, [generated.id]);
+                }
+
+                if (!targetRoom.battleState.liveState || Number(targetRoom.battleState.liveState.currentProblemNumber) === 0) {
+                    targetRoom.battleState.liveState = {
+                        currentProblemNumber: 1,
+                        currentProblem: generated,
+                        problemLocked: false,
+                        solvedBy: null,
+                        breakStartsAt: null,
+                        breakEndsAt: null,
+                        updatedAt: Date.now()
+                    };
+                }
+
+                sendToRoom(targetRoom, {
+                    type: 'NEXT_PROBLEM_READY',
+                    roomId: targetRoom.id,
+                    problemNumber: 1,
+                    problem: generated
+                });
+            }
+
+            return;
+        }
+
+        targetRoom.preGeneratedFirstProblem = generated;
+    } catch (error) {
+        console.error('Failed to generate first problem:', error);
+    } finally {
+        const targetRoom = rooms.get(room.id);
+        if (targetRoom) {
+            targetRoom.firstProblemGenerationInProgress = false;
+        }
+    }
+}
+
 async function startBattleForPair(room, startP1, startP2) {
     if (!room || (room.battleState && room.battleState.status === 'running')) return;
 
@@ -1189,20 +1452,19 @@ async function startBattleForPair(room, startP1, startP2) {
     ]));
 
     const reservedProblems = Array.isArray(room.preGeneratedProblems) && room.preGeneratedProblems.length > 0
-        ? room.preGeneratedProblems.slice(0, room.problems.length)
+        ? [room.preGeneratedProblems[0]].filter(Boolean)
         : [];
 
     let firstProblem = room.preGeneratedFirstProblem || reservedProblems[0] || null;
     if (firstProblem?.id && room.validationProblem?.id && firstProblem.id === room.validationProblem.id) {
         firstProblem = null;
     }
-    if (!firstProblem) {
-        firstProblem = await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, excludedIds);
-    }
     room.preGeneratedFirstProblem = null;
 
-    const selectedProblems = Array.from({ length: room.problems.length }, (_, index) => reservedProblems[index] || null);
-    selectedProblems[0] = firstProblem;
+    const selectedProblems = Array.from({ length: room.problems.length }, () => null);
+    if (firstProblem) {
+        selectedProblems[0] = firstProblem;
+    }
 
     const usedProblemIds = Array.from(new Set([
         ...excludedIds,
@@ -1234,8 +1496,8 @@ async function startBattleForPair(room, startP1, startP2) {
         problemWinners: {},
         solveAnnouncements: {},
         liveState: {
-            currentProblemNumber: 1,
-            currentProblem: firstProblem,
+            currentProblemNumber: firstProblem ? 1 : 0,
+            currentProblem: firstProblem || null,
             problemLocked: false,
             solvedBy: null,
             breakStartsAt: null,
@@ -1267,6 +1529,10 @@ async function startBattleForPair(room, startP1, startP2) {
         roomId: room.id,
         battleState: room.battleState
     });
+
+    if (!firstProblem) {
+        ensureFirstProblemReady(room).catch(() => {});
+    }
 
     broadcastActiveRooms();
 }
@@ -1330,34 +1596,9 @@ async function evaluateRoomValidationAndAutoStart(room) {
         });
 
         if (validP1 && validP2 && statuses[p1] && statuses[p2] && !room.countdownInProgress) {
-            const excludedIds = Array.from(new Set([
-                ...(room.validationProblem ? [room.validationProblem.id] : []),
-                ...((Array.isArray(room.bracketExcludedProblemIds) ? room.bracketExcludedProblemIds : []).map(id => String(id || '').trim()).filter(Boolean))
-            ]));
-            try {
-                let reservedFirstProblem = Array.isArray(room.preGeneratedProblems) && room.preGeneratedProblems.length > 0
-                    ? room.preGeneratedProblems[0]
-                    : null;
-
-                if (reservedFirstProblem?.id && room.validationProblem?.id && reservedFirstProblem.id === room.validationProblem.id) {
-                    reservedFirstProblem = null;
-                }
-
-                room.preGeneratedFirstProblem = reservedFirstProblem
-                    || await generateRoomProblemForConfig(room.problems[0] || { points: 500, rating: 1200 }, excludedIds);
-            } catch (generationError) {
-                console.error('Problem generation before countdown failed:', generationError);
-                broadcastValidationStatus(room, {
-                    pair,
-                    statuses,
-                    message: 'Could not generate battle problems. Retrying validation check...'
-                });
-                room.preGeneratedFirstProblem = null;
-                return;
-            }
-
             room.countdownInProgress = true;
             room.countdownEndsAt = Date.now() + MATCH_START_COUNTDOWN_MS;
+            ensureFirstProblemReady(room).catch(() => {});
 
             sendToRoom(room, {
                 type: 'MATCH_COUNTDOWN_STARTED',
@@ -1491,6 +1732,7 @@ function createRoomWithSharedLogic({
         countdownTimeout: null,
         countdownEndsAt: null,
         countdownInProgress: false,
+        firstProblemGenerationInProgress: false,
         preGeneratedFirstProblem: null,
         preGeneratedProblems: Array.isArray(preGeneratedProblems) ? preGeneratedProblems : [],
         bracketId: bracketId || null,
@@ -2168,9 +2410,9 @@ app.get('/api/profiles', (req, res) => {
 });
 
 app.post('/api/profiles', (req, res) => {
-    const handle = String(req.body?.handle || '').trim();
+    const handle = String(extractRequesterHandle(req) || '').trim();
     if (!handle) {
-        res.status(400).json({ error: 'handle is required' });
+        res.status(401).json({ error: 'Login required' });
         return;
     }
 
@@ -2179,9 +2421,9 @@ app.post('/api/profiles', (req, res) => {
 });
 
 app.post('/api/presence/ping', (req, res) => {
-    const handle = String(req.body?.handle || '').trim();
+    const handle = String(extractRequesterHandle(req) || '').trim();
     if (!handle) {
-        res.status(400).json({ error: 'handle is required' });
+        res.status(401).json({ error: 'Login required' });
         return;
     }
 
@@ -2191,6 +2433,75 @@ app.post('/api/presence/ping', (req, res) => {
     markHandleSeen(handle, now);
 
     res.json({ success: true, now });
+});
+
+app.get('/api/session/me', (req, res) => {
+    const session = getServerSession(req);
+    if (!session) {
+        clearSessionCookie(res);
+        res.json({ authenticated: false });
+        return;
+    }
+
+    res.json({
+        authenticated: true,
+        handle: session.handle,
+        expiresAt: session.expiresAt
+    });
+});
+
+app.post('/api/session/login', async (req, res) => {
+    try {
+        const handle = normalizeHandle(req.body?.handle || '');
+        if (!handle) {
+            res.status(400).json({ error: 'handle is required' });
+            return;
+        }
+
+        const problemRaw = req.body?.validationProblem;
+        const validationProblem = problemRaw && typeof problemRaw === 'object'
+            ? {
+                contestId: Number(problemRaw.contestId),
+                index: String(problemRaw.index || '').trim().toUpperCase()
+            }
+            : null;
+
+        if (!validationProblem || !Number.isFinite(validationProblem.contestId) || !validationProblem.index) {
+            res.status(400).json({ error: 'validationProblem is required' });
+            return;
+        }
+
+        const handleValid = await validateHandle(handle);
+        if (!handleValid) {
+            res.status(400).json({ error: 'Invalid Codeforces handle' });
+            return;
+        }
+
+        const verified = await hasCompilationErrorOnProblem(handle, validationProblem);
+        if (!verified) {
+            res.status(401).json({ error: 'Handle verification not found for the selected problem' });
+            return;
+        }
+
+        destroyServerSession(req);
+        const session = createServerSession(handle);
+        if (!session) {
+            res.status(500).json({ error: 'Could not create session' });
+            return;
+        }
+
+        upsertProfileHandle(handle);
+        setSessionCookie(res, session.id);
+        res.json({ success: true, handle: session.handle, expiresAt: session.expiresAt });
+    } catch (error) {
+        res.status(500).json({ error: error.message || 'Could not create session' });
+    }
+});
+
+app.post('/api/session/logout', (req, res) => {
+    destroyServerSession(req);
+    clearSessionCookie(res);
+    res.json({ success: true });
 });
 
 app.post('/api/results', async (req, res) => {
@@ -2297,7 +2608,7 @@ app.post('/api/feedback', async (req, res) => {
     try {
         const requesterHandle = extractRequesterHandle(req);
         if (!requesterHandle) {
-            res.status(400).json({ error: 'requesterHandle is required' });
+            res.status(401).json({ error: 'Login required' });
             return;
         }
 
@@ -2318,7 +2629,8 @@ app.post('/api/feedback', async (req, res) => {
             createdAt: new Date().toISOString(),
             updatedBy: null,
             updatedAt: null,
-            history: []
+            history: [],
+            replies: []
         };
 
         store.items.unshift(next);
@@ -2338,6 +2650,138 @@ app.post('/api/feedback', async (req, res) => {
         });
 
         res.json(next);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/feedback/:feedbackId/replies', async (req, res) => {
+    try {
+        const feedbackId = String(req.params.feedbackId || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
+        const replyBy = String(requesterHandle || '').trim() || 'anonymous';
+        const message = String(req.body?.message || '').trim();
+
+        if (!feedbackId) {
+            res.status(400).json({ error: 'feedbackId is required' });
+            return;
+        }
+
+        if (!message) {
+            res.status(400).json({ error: 'message is required' });
+            return;
+        }
+
+        const store = await readFeedbackStore();
+        const index = store.items.findIndex(item => item.id === feedbackId);
+        if (index === -1) {
+            res.status(404).json({ error: 'Feedback not found' });
+            return;
+        }
+
+        const current = store.items[index];
+        const reply = {
+            id: `fr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            message,
+            createdBy: replyBy,
+            createdAt: new Date().toISOString()
+        };
+
+        const replies = Array.isArray(current.replies) ? current.replies : [];
+        const next = {
+            ...current,
+            replies: [...replies, reply],
+            updatedBy: replyBy,
+            updatedAt: reply.createdAt
+        };
+
+        store.items[index] = next;
+        pushFeedbackActivity(store, {
+            type: 'replied',
+            by: replyBy,
+            feedbackId: next.id,
+            feedbackTitle: next.title,
+            details: {
+                replyId: reply.id
+            }
+        });
+
+        await writeFeedbackStore(store);
+
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'FEEDBACK_UPDATED' }));
+            }
+        });
+
+        res.json(reply);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/feedback/:feedbackId/replies/:replyId', async (req, res) => {
+    try {
+        const feedbackId = String(req.params.feedbackId || '').trim();
+        const replyId = String(req.params.replyId || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
+        const adminPassword = extractAdminPassword(req);
+
+        if (!feedbackId || !replyId) {
+            res.status(400).json({ error: 'feedbackId and replyId are required' });
+            return;
+        }
+
+        const store = await readFeedbackStore();
+        const feedbackIndex = store.items.findIndex(item => item.id === feedbackId);
+        if (feedbackIndex === -1) {
+            res.status(404).json({ error: 'Feedback not found' });
+            return;
+        }
+
+        const feedbackItem = store.items[feedbackIndex];
+        const replies = Array.isArray(feedbackItem.replies) ? feedbackItem.replies : [];
+        const replyIndex = replies.findIndex(reply => String(reply?.id || '').trim() === replyId);
+        if (replyIndex === -1) {
+            res.status(404).json({ error: 'Reply not found' });
+            return;
+        }
+
+        const reply = replies[replyIndex];
+        if (!canDeleteFeedbackReply(reply, requesterHandle, adminPassword)) {
+            res.status(403).json({ error: 'Only reply author or admin can delete this reply' });
+            return;
+        }
+
+        const remainingReplies = replies.filter((_, index) => index !== replyIndex);
+        const next = {
+            ...feedbackItem,
+            replies: remainingReplies,
+            updatedBy: String(requesterHandle || '').trim() || 'anonymous',
+            updatedAt: new Date().toISOString()
+        };
+
+        store.items[feedbackIndex] = next;
+        pushFeedbackActivity(store, {
+            type: 'reply_deleted',
+            by: String(requesterHandle || '').trim() || 'anonymous',
+            feedbackId: next.id,
+            feedbackTitle: next.title,
+            details: {
+                replyId,
+                replyBy: reply.createdBy || 'unknown'
+            }
+        });
+
+        await writeFeedbackStore(store);
+
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'FEEDBACK_UPDATED' }));
+            }
+        });
+
+        res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2495,13 +2939,13 @@ app.get('/api/brackets', async (req, res) => {
 app.post('/api/brackets', async (req, res) => {
     try {
         const body = req.body || {};
-        const ownerHandle = String(body.ownerHandle || '').trim();
+        const ownerHandle = String(extractRequesterHandle(req) || '').trim();
         const type = String(body.type || 'round-robin').trim();
         const participants = normalizeParticipants(body.participants || []);
         const roomConfig = normalizeBracketRoomConfig(body.roomConfig || {});
 
         if (!ownerHandle) {
-            res.status(400).json({ error: 'ownerHandle is required' });
+            res.status(401).json({ error: 'Login required' });
             return;
         }
 
@@ -2544,7 +2988,7 @@ app.post('/api/brackets', async (req, res) => {
 app.delete('/api/brackets/:bracketId', async (req, res) => {
     try {
         const { bracketId } = req.params;
-        const requesterHandle = String(req.query.requesterHandle || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
         const adminPassword = extractAdminPassword(req);
 
         const brackets = await readBrackets();
@@ -2571,7 +3015,7 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
     try {
         const { bracketId, matchId } = req.params;
         const body = req.body || {};
-        const requesterHandle = String(body.requesterHandle || '').trim();
+        const requesterHandle = extractRequesterHandle(req);
         const adminPassword = extractAdminPassword(req);
 
         const brackets = await readBrackets();
@@ -2620,14 +3064,10 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
                 ? roomConfig.problems
                 : buildDefaultProblems(roomConfig.problemCount));
         const bracketUsedProblemIds = getBracketUsedProblemIds(bracket);
-        const preGeneratedProblems = await generateRoomProblems(requestedProblemConfigs, bracketUsedProblemIds);
-        const reservedProblemIds = preGeneratedProblems
-            .map(problem => String(problem?.id || '').trim())
-            .filter(Boolean);
+        const preGeneratedProblems = [];
 
         bracket.usedProblemIds = Array.from(new Set([
-            ...bracketUsedProblemIds,
-            ...reservedProblemIds
+            ...bracketUsedProblemIds
         ]));
 
         const room = await createBracketRoom({
@@ -2664,7 +3104,7 @@ const RESERVED_HANDLE_PATHS = new Set([
     'api'
 ]);
 
-app.get('/:handle([A-Za-z0-9_-]{1,24})', (req, res, next) => {
+app.get('/:handle([A-Za-z0-9._-]{1,24})', (req, res, next) => {
     const handle = String(req.params.handle || '').trim();
     if (!handle) {
         next();
@@ -2680,6 +3120,10 @@ app.get('/:handle([A-Za-z0-9_-]{1,24})', (req, res, next) => {
 });
 
 Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
+    setInterval(() => {
+        cleanupExpiredSessions();
+    }, 10 * 60 * 1000);
+
     setInterval(() => {
         rooms.forEach(room => {
             evaluateRoomValidationAndAutoStart(room).catch(() => {});

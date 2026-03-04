@@ -60,6 +60,11 @@
     let leaderboardTieOrder = Math.random() < 0.5 ? ['p1', 'p2'] : ['p2', 'p1'];
     let syncedActiveHandle = '';
     let pendingPostLoginReturnTo = '';
+    let spectatorPresenceMap = new Map();
+    let matchSpectatorHandles = new Set();
+    const SPECTATOR_RECENT_JOIN_MS = 60000;
+    const SPECTATOR_KEEP_LEFT_MS = 3 * 60 * 1000;
+    let celebrationRedirectTimer = null;
 
     
     // Track solved problems
@@ -106,6 +111,15 @@
             pending,
             solvedAtSec
         };
+    }
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     function getProblemResultFor(playerKey, index) {
@@ -211,6 +225,9 @@
 
     const API_BASE_URL = window.location.origin;
     const WS_URL = window.location.origin.replace('http', 'ws');
+    const AUTH_META_KEY = 'blitzAuthMeta';
+    const AUTH_DEPLOY_TOKEN = 'v2.1';
+    const AUTH_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
     // Rating options
     const ratingOptions = Array.from({ length: 28 }, (_, index) => 800 + (index * 100));
@@ -234,6 +251,148 @@
 
     function getPendingJoinRoomIdKey() {
         return 'blitzPendingJoinRoomId';
+    }
+
+    function readAuthMeta() {
+        const raw = localStorage.getItem(AUTH_META_KEY);
+        if (!raw) return null;
+
+        try {
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            const issuedAt = Number(parsed.issuedAt) || 0;
+            const deployToken = String(parsed.deployToken || '').trim();
+            if (!issuedAt || !deployToken) return null;
+            return { issuedAt, deployToken };
+        } catch {
+            return null;
+        }
+    }
+
+    function clearAuthSessionStorage() {
+        localStorage.removeItem(getUserHandleStorageKey());
+        localStorage.removeItem(getUserAvatarStorageKey());
+        localStorage.removeItem('blitzRoomState');
+        localStorage.removeItem(getRuntimeStateKey());
+        localStorage.removeItem(getPendingJoinRoomIdKey());
+        localStorage.removeItem(AUTH_META_KEY);
+    }
+
+    function isAuthSessionValid() {
+        const meta = readAuthMeta();
+        if (!meta) return false;
+        if (meta.deployToken !== AUTH_DEPLOY_TOKEN) return false;
+        return (Date.now() - meta.issuedAt) <= AUTH_MAX_AGE_MS;
+    }
+
+    function stampAuthSessionMeta() {
+        localStorage.setItem(AUTH_META_KEY, JSON.stringify({
+            issuedAt: Date.now(),
+            deployToken: AUTH_DEPLOY_TOKEN
+        }));
+    }
+
+    async function syncAuthFromServerSession() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/session/me`, {
+                method: 'GET',
+                credentials: 'same-origin'
+            });
+            if (!response.ok) return false;
+
+            const data = await response.json();
+            if (!data || !data.authenticated || !data.handle) {
+                if (String(localStorage.getItem(getUserHandleStorageKey()) || '').trim()) {
+                    clearAuthSessionStorage();
+                }
+                if (String(userHandle || '').trim()) {
+                    userHandle = '';
+                    userAvatarUrl = '';
+                    playersValidated = false;
+                    userHandleInput.value = '';
+                    renderLoggedInfo();
+                }
+                return false;
+            }
+
+            const serverHandle = String(data.handle || '').trim();
+            if (!serverHandle) return false;
+
+            if (!String(userHandle || '').trim()) {
+                userHandle = serverHandle;
+                userHandleInput.value = serverHandle;
+                playersValidated = true;
+            }
+
+            localStorage.setItem(getUserHandleStorageKey(), userHandle || serverHandle);
+            stampAuthSessionMeta();
+            renderLoggedInfo();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async function createServerSessionForHandle(handle, validationProblem) {
+        const cleanHandle = String(handle || '').trim();
+        if (!cleanHandle || !validationProblem) return false;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/session/login`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    handle: cleanHandle,
+                    validationProblem: {
+                        contestId: Number(validationProblem.contestId),
+                        index: String(validationProblem.index || '').trim()
+                    }
+                })
+            });
+
+            return response.ok;
+        } catch {
+            return false;
+        }
+    }
+
+    async function logoutServerSession() {
+        try {
+            await fetch(`${API_BASE_URL}/api/session/logout`, {
+                method: 'POST',
+                credentials: 'same-origin'
+            });
+        } catch {
+        }
+    }
+
+    function logoutCurrentUser() {
+        const currentHandleSnapshot = String(userHandle || '').trim();
+        if (currentRoom && ws && ws.readyState === WebSocket.OPEN && currentHandleSnapshot) {
+            ws.send(JSON.stringify({
+                type: 'LEAVE_ROOM',
+                roomId: currentRoom,
+                handle: currentHandleSnapshot
+            }));
+        }
+
+        if (currentRoom) {
+            leaveRoom();
+        }
+
+        logoutServerSession().catch(() => {});
+
+        clearAuthSessionStorage();
+        userHandle = '';
+        userAvatarUrl = '';
+        playersValidated = false;
+        userHandleInput.value = '';
+        syncedActiveHandle = '';
+        renderLoggedInfo();
+        if (userProfileModal) {
+            userProfileModal.style.display = 'none';
+        }
     }
 
     function tryJoinPendingRoom() {
@@ -558,6 +717,7 @@
                 <a href="${base}" target="_blank" rel="noopener noreferrer">CF Profile</a>
                 <a href="${historyUrl}" target="_blank" rel="noopener noreferrer">History</a>
                 <a href="${h2hUrl}" target="_blank" rel="noopener noreferrer">Head-to-Head</a>
+                ${canEditOwnHandle ? '<button type="button" class="user-profile-logout-btn" data-logout-handle="1">Logout</button>' : ''}
             </div>
             <div class="user-profile-site">
                 <h4>PUC Blitz Stats</h4>
@@ -611,6 +771,11 @@
 
     // Load saved state
     function loadSavedState() {
+        const hasPersistedHandle = !!String(localStorage.getItem(getUserHandleStorageKey()) || '').trim();
+        if (hasPersistedHandle && !isAuthSessionValid()) {
+            clearAuthSessionStorage();
+        }
+
         const persistedHandle = localStorage.getItem(getUserHandleStorageKey()) || '';
         const persistedAvatar = localStorage.getItem(getUserAvatarStorageKey()) || '';
         if (persistedHandle) {
@@ -665,6 +830,9 @@
         if (userHandle) {
             localStorage.setItem(getUserHandleStorageKey(), userHandle);
             localStorage.setItem(getUserAvatarStorageKey(), userAvatarUrl || '');
+            stampAuthSessionMeta();
+        } else {
+            localStorage.removeItem(AUTH_META_KEY);
         }
     }
 
@@ -822,7 +990,7 @@
                 break;
 
             case 'PLAYER_JOINED':
-                updateRoomPlayers(data.players || []);
+                updateRoomPlayers(data.players || [], { type: 'joined', handle: data.handle });
                 if (data.handle) {
                     const joinedLabel = data.role === 'spectator' ? 'Spectator Joined' : 'Player Joined';
                     showDesktopNotification(`👋 ${joinedLabel}`, `${data.handle} joined the room`, false, true);
@@ -861,12 +1029,12 @@
                 
             case 'PLAYER_LEFT':
                 showDesktopNotification('👋 Player Left', `${data.handle} left the room`);
-                updateRoomPlayers(data.players);
+                updateRoomPlayers(data.players, { type: 'left', handle: data.handle });
                 break;
                 
             case 'PLAYER_RECONNECTED':
                 showDesktopNotification('🔄 Player Reconnected', `${data.handle} reconnected`);
-                updateRoomPlayers(data.players);
+                updateRoomPlayers(data.players, { type: 'reconnected', handle: data.handle });
                 break;
                 
             case 'ACTIVE_ROOMS':
@@ -921,6 +1089,11 @@
                     matchStatusText.textContent = '⏱️ Match timer ended. Checking pending submissions...';
                     break;
                 }
+                if (battleActive && !problemLocked && currentProblem && hasAnyPendingOnCurrentProblem()) {
+                    matchStatusText.textContent = '⏱️ Pending queued verdicts detected. Checking before final result...';
+                    verifyFinalSubmissionsAtTimerEnd().catch(() => {});
+                    break;
+                }
                 stopBattle(true);
                 break;
 
@@ -935,11 +1108,7 @@
                     const solvedProblemNumber = Number(data.problemNumber) || 0;
                     const isCurrentProblem = solvedProblemNumber === currentProblemIndex;
                     if (isCurrentProblem) {
-                        if (data.solverHandle === player1Handle) {
-                            handleSolve('p1');
-                        } else if (data.solverHandle === player2Handle) {
-                            handleSolve('p2');
-                        }
+                        checkSubmissions().catch(() => {});
                     }
                 }
                 break;
@@ -1278,13 +1447,87 @@
         problemsDisplayBody.innerHTML = html;
     }
 
-    function updateRoomPlayers(players) {
+    function updateRoomPlayers(players, eventMeta = null) {
         const list = Array.isArray(players) ? players.filter(Boolean) : [];
         roomPlayers.textContent = `👥 ${list.length} joined`;
         if (roomData) {
             roomData.players = list;
         }
-        renderLiveSpectatorList(list);
+        renderLiveSpectatorList(list, eventMeta);
+    }
+
+    function getSpectatorHandles(players = []) {
+        const uniqueHandles = Array.from(new Set((players || []).map(item => String(item || '').trim()).filter(Boolean)));
+        const p1 = String(player1Handle || '').trim().toLowerCase();
+        const p2 = String(player2Handle || '').trim().toLowerCase();
+        return uniqueHandles.filter(handle => {
+            const normalized = handle.toLowerCase();
+            return normalized !== p1 && normalized !== p2;
+        });
+    }
+
+    function updateSpectatorPresence(players = [], eventMeta = null) {
+        const now = Date.now();
+        const activeSpectators = getSpectatorHandles(players);
+        const activeSet = new Set(activeSpectators.map(handle => handle.toLowerCase()));
+
+        activeSpectators.forEach(handle => {
+            const key = handle.toLowerCase();
+            matchSpectatorHandles.add(handle);
+            const existing = spectatorPresenceMap.get(key);
+            const next = existing ? { ...existing } : { key, label: handle, status: 'online', joinedAt: now, leftAt: null };
+            next.label = handle;
+            if (next.status !== 'online') {
+                next.joinedAt = now;
+            }
+            next.status = 'online';
+            next.leftAt = null;
+            spectatorPresenceMap.set(key, next);
+        });
+
+        spectatorPresenceMap.forEach((entry, key) => {
+            if (!activeSet.has(key) && entry.status === 'online') {
+                entry.status = 'left';
+                entry.leftAt = now;
+                spectatorPresenceMap.set(key, entry);
+            }
+        });
+
+        if (eventMeta && eventMeta.handle) {
+            const eventHandle = String(eventMeta.handle || '').trim();
+            const eventKey = eventHandle.toLowerCase();
+            const isPlayer = eventKey === String(player1Handle || '').trim().toLowerCase()
+                || eventKey === String(player2Handle || '').trim().toLowerCase();
+
+            if (!isPlayer && eventHandle) {
+                matchSpectatorHandles.add(eventHandle);
+                const existing = spectatorPresenceMap.get(eventKey) || {
+                    key: eventKey,
+                    label: eventHandle,
+                    status: 'online',
+                    joinedAt: now,
+                    leftAt: null
+                };
+
+                if (eventMeta.type === 'left') {
+                    existing.status = 'left';
+                    existing.leftAt = now;
+                } else if (eventMeta.type === 'joined' || eventMeta.type === 'reconnected') {
+                    existing.status = 'online';
+                    existing.leftAt = null;
+                    existing.joinedAt = now;
+                }
+
+                existing.label = eventHandle;
+                spectatorPresenceMap.set(eventKey, existing);
+            }
+        }
+
+        spectatorPresenceMap.forEach((entry, key) => {
+            if (entry.status === 'left' && (now - (Number(entry.leftAt) || 0)) > SPECTATOR_KEEP_LEFT_MS) {
+                spectatorPresenceMap.delete(key);
+            }
+        });
     }
 
     function captureSpectatorChipRects() {
@@ -1332,32 +1575,52 @@
         });
     }
 
-    function renderLiveSpectatorList(players = []) {
+    function renderLiveSpectatorList(players = [], eventMeta = null) {
         if (!spectatorPanel || !spectatorCountText || !spectatorList) return;
 
         if (!battleActive) {
             spectatorPanel.style.display = 'none';
             spectatorCountText.textContent = '0 live';
             spectatorList.innerHTML = '';
+            spectatorPresenceMap = new Map();
+            matchSpectatorHandles = new Set();
             return;
         }
 
-        const uniqueHandles = Array.from(new Set((players || []).map(item => String(item || '').trim()).filter(Boolean)));
-        const p1 = String(player1Handle || '').trim().toLowerCase();
-        const p2 = String(player2Handle || '').trim().toLowerCase();
-        const spectators = uniqueHandles.filter(handle => {
-            const normalized = handle.toLowerCase();
-            return normalized !== p1 && normalized !== p2;
+        updateSpectatorPresence(players, eventMeta);
+
+        const now = Date.now();
+        const spectatorEntries = Array.from(spectatorPresenceMap.values()).sort((a, b) => {
+            if (a.status !== b.status) {
+                return a.status === 'online' ? -1 : 1;
+            }
+            const aTime = Number(a.joinedAt || a.leftAt || 0);
+            const bTime = Number(b.joinedAt || b.leftAt || 0);
+            return bTime - aTime;
         });
+
+        const liveCount = spectatorEntries.filter(entry => entry.status === 'online').length;
+        const leftCount = spectatorEntries.filter(entry => entry.status === 'left').length;
 
         const previousRects = captureSpectatorChipRects();
 
-        spectatorCountText.textContent = `${spectators.length} live`;
+        spectatorCountText.textContent = leftCount > 0
+            ? `${liveCount} live · ${leftCount} left`
+            : `${liveCount} live`;
 
-        const desiredSpectators = spectators.map(handle => ({
-            key: handle.toLowerCase(),
-            label: handle
-        }));
+        const desiredSpectators = spectatorEntries.map(entry => {
+            const joinedRecently = entry.status === 'online' && (now - (Number(entry.joinedAt) || 0)) <= SPECTATOR_RECENT_JOIN_MS;
+            const statusClass = entry.status === 'online' ? 'is-online' : 'is-left';
+            const statusText = entry.status === 'online'
+                ? (joinedRecently ? 'newly joined' : 'live now')
+                : 'left';
+            return {
+                key: entry.key,
+                label: entry.label,
+                statusClass,
+                statusText
+            };
+        });
         const desiredKeys = new Set(desiredSpectators.map(item => item.key));
 
         const emptyState = spectatorList.querySelector('.spectator-empty');
@@ -1375,7 +1638,7 @@
         });
 
         const ensureEmptyState = () => {
-            if (spectators.length !== 0) return;
+            if (desiredSpectators.length !== 0) return;
             const remainingChips = spectatorList.querySelectorAll('.spectator-chip').length;
             if (remainingChips > 0) return;
             if (!spectatorList.querySelector('.spectator-empty')) {
@@ -1407,19 +1670,27 @@
             setTimeout(removeChip, 260);
         });
 
-        desiredSpectators.forEach(({ key, label }) => {
+        desiredSpectators.forEach(({ key, label, statusClass, statusText }) => {
             const existing = existingByKey.get(key);
             if (existing) {
-                existing.textContent = label;
+                existing.classList.remove('is-online', 'is-left');
+                existing.classList.add(statusClass);
+                existing.innerHTML = `<span class="spectator-chip-handle">${escapeHtml(label)}</span><span class="spectator-chip-status">${escapeHtml(statusText)}</span>`;
+                existing.setAttribute('title', `Open profile: ${label}`);
+                existing.setAttribute('role', 'button');
+                existing.setAttribute('tabindex', '0');
                 existing.classList.remove('is-leaving');
                 spectatorList.appendChild(existing);
                 return;
             }
 
             const chip = document.createElement('span');
-            chip.className = 'spectator-chip is-entering';
+            chip.className = `spectator-chip ${statusClass} is-entering`;
             chip.dataset.handle = key;
-            chip.textContent = label;
+            chip.innerHTML = `<span class="spectator-chip-handle">${escapeHtml(label)}</span><span class="spectator-chip-status">${escapeHtml(statusText)}</span>`;
+            chip.setAttribute('title', `Open profile: ${label}`);
+            chip.setAttribute('role', 'button');
+            chip.setAttribute('tabindex', '0');
             spectatorList.appendChild(chip);
 
             requestAnimationFrame(() => {
@@ -1516,6 +1787,12 @@
     }
 
     async function completeHandleSetup(profile) {
+        const sessionReady = await createServerSessionForHandle(profile.handle, handleVerificationProblem);
+        if (!sessionReady) {
+            alert('Could not create secure server session. Please complete verification again.');
+            return;
+        }
+
         userHandle = profile.handle;
         userAvatarUrl = profile.avatar || '';
         playersValidated = true;
@@ -1524,8 +1801,8 @@
         try {
             await fetch(`${API_BASE_URL}/api/profiles`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ handle: profile.handle })
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }
             });
         } catch {
         }
@@ -1633,6 +1910,12 @@
 
     if (userProfileBody) {
         userProfileBody.addEventListener('click', (event) => {
+            const logoutBtn = event.target.closest('[data-logout-handle]');
+            if (logoutBtn) {
+                logoutCurrentUser();
+                return;
+            }
+
             const changeHandleBtn = event.target.closest('[data-change-handle]');
             if (changeHandleBtn) {
                 userProfileModal.style.display = 'none';
@@ -1652,6 +1935,27 @@
     if (activeRoomsSearchInput) {
         activeRoomsSearchInput.addEventListener('input', () => {
             renderFilteredActiveRooms();
+        });
+    }
+
+    if (spectatorList) {
+        spectatorList.addEventListener('click', (event) => {
+            const chip = event.target.closest('.spectator-chip[data-handle]');
+            if (!chip) return;
+            const targetHandle = String(chip.dataset.handle || '').trim();
+            if (!targetHandle) return;
+            event.preventDefault();
+            openUserProfileModal(targetHandle).catch(() => {});
+        });
+
+        spectatorList.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const chip = event.target.closest('.spectator-chip[data-handle]');
+            if (!chip) return;
+            const targetHandle = String(chip.dataset.handle || '').trim();
+            if (!targetHandle) return;
+            event.preventDefault();
+            openUserProfileModal(targetHandle).catch(() => {});
         });
     }
 
@@ -1751,6 +2055,8 @@
         if (spectatorPanel) {
             spectatorPanel.style.display = 'none';
         }
+        spectatorPresenceMap = new Map();
+        matchSpectatorHandles = new Set();
         roomValidationMini.style.display = 'none';
         configDashboard.style.display = 'none';
         validationSection.style.display = 'none';
@@ -1798,7 +2104,7 @@
         const renderCountdown = () => {
             const remaining = Math.max(0, Math.ceil((matchCountdownEndsAt - getSyncedNow()) / 1000));
             if (validationStatusText) {
-                validationStatusText.textContent = `Both participants verified. Match starts in ${remaining}s.`;
+                validationStatusText.textContent = `Both participants verified. Match starts in ${remaining}s. Fetching first problem...`;
             }
             if (matchCountdownTime) {
                 matchCountdownTime.textContent = `${remaining}`;
@@ -2001,17 +2307,17 @@
         return players;
     }
 
-    function renderLeaderboardRow(player) {
+    function renderLeaderboardRow(player, standingPosition) {
         let row = `<tr data-player-id="${player.id}">`;
-        row += `<td><span class="${player.rankColor}"><strong>${player.handle}</strong></span></td>`;
-        row += `<td><span class="${player.rankColor}">${player.rank}</span></td>`;
+        row += `<td><span class="${player.rankColor}"><strong>${player.handle}</strong></span><div class="leaderboard-cf-rank ${player.rankColor}">${player.rank}</div></td>`;
+        row += `<td><span class="leaderboard-standing">#${standingPosition}</span></td>`;
         row += `<td><strong style="color: #ffd966;">${player.score}</strong></td>`;
 
         problems.forEach((_, index) => {
             const result = normalizeProblemResultEntry(player.results[index] || createEmptyProblemResult());
             if (result.solved) {
                 const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
-                const solveTimeHtml = Number.isFinite(Number(result.solvedAtSec))
+                const solveTimeHtml = Number.isFinite(result.solvedAtSec)
                     ? `<div class="problem-cell-sub">${formatTime(result.solvedAtSec)}</div>`
                     : '';
                 row += `<td class="problem-cell status-ac"><div class="problem-cell-main">${acLabel}</div>${solveTimeHtml}</td>`;
@@ -2072,7 +2378,7 @@
             previousTopById.set(playerId, row.getBoundingClientRect().top);
         });
 
-        const rows = getOrderedLeaderboardPlayers().map(player => renderLeaderboardRow(player));
+        const rows = getOrderedLeaderboardPlayers().map((player, index) => renderLeaderboardRow(player, index + 1));
         leaderboardBody.innerHTML = rows.join('');
 
         if (previousTopById.size > 0) {
@@ -2188,6 +2494,30 @@
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
+    function buildResultsRedirectUrl() {
+        const roomId = String(currentRoom || '').trim().toUpperCase();
+        if (!roomId) return 'results.html';
+        return `results.html?roomId=${encodeURIComponent(roomId)}`;
+    }
+
+    function redirectToResultsPage() {
+        window.location.href = buildResultsRedirectUrl();
+    }
+
+    function scheduleResultsRedirect(delayMs = 15000) {
+        if (celebrationRedirectTimer) {
+            clearTimeout(celebrationRedirectTimer);
+            celebrationRedirectTimer = null;
+        }
+
+        celebrationRedirectTimer = setTimeout(() => {
+            if (celebrationModal) {
+                celebrationModal.style.display = 'none';
+            }
+            redirectToResultsPage();
+        }, Math.max(0, Number(delayMs) || 0));
+    }
+
     function updateTimerDisplay() {
         matchTimer.textContent = formatTime(timeLeftSec);
     }
@@ -2251,7 +2581,8 @@
             accepted: null,
             hasPending: false,
             hasJudgedFail: false,
-            judgedFailCount: 0
+            judgedFailCount: 0,
+            earliestPendingMs: null
         };
 
         if (!submissionData || submissionData.status !== 'OK' || !Array.isArray(submissionData.result) || !problem) {
@@ -2298,6 +2629,9 @@
 
             if (isPendingVerdict(sub.verdict)) {
                 hasPending = true;
+                if (!analysis.earliestPendingMs || (sub.submitMs && sub.submitMs < analysis.earliestPendingMs)) {
+                    analysis.earliestPendingMs = sub.submitMs || analysis.earliestPendingMs;
+                }
             } else {
                 failCount += 1;
             }
@@ -2312,6 +2646,26 @@
 
     function getSubmissionWindowStartMs() {
         return currentProblemOpenedAt || battleStartTime || 0;
+    }
+
+    function hasAnyPendingOnCurrentProblem() {
+        const index = Math.max(0, Number(currentProblemIndex || 0) - 1);
+        const p1 = normalizeProblemResultEntry(problemResults?.p1?.[index] || createEmptyProblemResult());
+        const p2 = normalizeProblemResultEntry(problemResults?.p2?.[index] || createEmptyProblemResult());
+        return !!p1.pending || !!p2.pending;
+    }
+
+    function hasBlockingPendingForWinnerDecision(p1Analysis, p2Analysis) {
+        const acceptedMs = [p1Analysis?.accepted?.submitMs, p2Analysis?.accepted?.submitMs]
+            .map(value => Number(value) || 0)
+            .filter(value => value > 0)
+            .sort((a, b) => a - b)[0] || 0;
+
+        if (!acceptedMs) {
+            return !!p1Analysis?.hasPending || !!p2Analysis?.hasPending;
+        }
+
+        return false;
     }
 
     async function verifyFinalSubmissionsAtTimerEnd() {
@@ -2345,11 +2699,19 @@
                 const windowStartMs = getSubmissionWindowStartMs();
                 const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, deadlineMs, windowStartMs);
                 const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, deadlineMs, windowStartMs);
+                const hasBlockingPending = hasBlockingPendingForWinnerDecision(p1Analysis, p2Analysis);
 
                 const p1Accepted = p1Analysis.accepted;
                 const p2Accepted = p2Analysis.accepted;
 
                 if (p1Accepted || p2Accepted) {
+                    if (hasBlockingPending) {
+                        reportPendingSubmissionStatus(true);
+                        matchStatusText.textContent = '⏱️ Match timer ended. Waiting for queued verdicts...';
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+
                     reportPendingSubmissionStatus(false);
                     let solver = 'p1';
                     let solverSubmitMs = p1Accepted?.submitMs || null;
@@ -2415,7 +2777,7 @@
             currentProblem = null;
             currentProblemOpenedAt = null;
             problemLocked = false;
-            lockStatusDiv.textContent = `⏳ Generating Problem ${currentProblemIndex + 1}/${problems.length}...`;
+            lockStatusDiv.textContent = `⏳ Fetching Problem ${currentProblemIndex + 1}/${problems.length}...`;
             lockStatusDiv.className = 'problem-lock-status';
             return;
         }
@@ -2461,19 +2823,31 @@
             const windowStartMs = getSubmissionWindowStartMs();
             const p1Analysis = analyzeSubmissionsForProblem(p1Data, currentProblem, null, windowStartMs);
             const p2Analysis = analyzeSubmissionsForProblem(p2Data, currentProblem, null, windowStartMs);
+            const hasBlockingPending = hasBlockingPendingForWinnerDecision(p1Analysis, p2Analysis);
+            const hasAnyAccepted = !!p1Analysis.accepted || !!p2Analysis.accepted;
 
             if (!p1Result.solved) {
-                p1Result.pending = !!p1Analysis.hasPending && !p1Analysis.accepted;
+                p1Result.pending = hasAnyAccepted ? false : !!p1Analysis.hasPending;
                 p1Result.attempts = Math.max(0, Number(p1Analysis.judgedFailCount) || 0);
             }
 
             if (!p2Result.solved) {
-                p2Result.pending = !!p2Analysis.hasPending && !p2Analysis.accepted;
+                p2Result.pending = hasAnyAccepted ? false : !!p2Analysis.hasPending;
                 p2Result.attempts = Math.max(0, Number(p2Analysis.judgedFailCount) || 0);
             }
 
             const p1Accepted = p1Analysis.accepted;
             const p2Accepted = p2Analysis.accepted;
+
+            if (hasBlockingPending) {
+                lockStatusDiv.textContent = `⏳ Problem ${currentProblemIndex}/${problems.length} · queued verdict pending`;
+                lockStatusDiv.className = 'problem-lock-status';
+                reportPendingSubmissionStatus(true);
+                updatePlayerUI();
+                return;
+            }
+
+            reportPendingSubmissionStatus(false);
 
             if (p1Accepted || p2Accepted) {
                 if (!p2Accepted || (p1Accepted && p1Accepted.submitMs <= p2Accepted.submitMs)) {
@@ -2620,12 +2994,18 @@
     async function submitBattleResult(winner) {
         if (resultSubmitted || !matchKey) return;
 
+        const spectators = Array.from(matchSpectatorHandles)
+            .map(handle => String(handle || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b));
+
         const payload = {
             matchKey,
             roomId: currentRoom,
             date: new Date().toISOString(),
             duration: Math.round(totalDurationSec / 60),
             winner,
+            spectators,
             player1: {
                 handle: player1Handle,
                 score: player1Score,
@@ -2667,6 +3047,11 @@
     async function stopBattle(fromServer = false, persistResult = true) {
         if (!battleActive && resultSubmitted) return;
 
+        if (celebrationRedirectTimer) {
+            clearTimeout(celebrationRedirectTimer);
+            celebrationRedirectTimer = null;
+        }
+
         battleActive = false;
         endAfterCurrentSolve = false;
         timerEndVerificationInProgress = false;
@@ -2691,6 +3076,7 @@
         if (spectatorPanel) {
             spectatorPanel.style.display = 'none';
         }
+        spectatorPresenceMap = new Map();
         breakStartTime = null;
         clearBattleRuntimeState();
         
@@ -2715,6 +3101,8 @@
             await submitBattleResult(winner);
         }
 
+        matchSpectatorHandles = new Set();
+
         const finalScoreText = `${player1Handle}: ${player1Score} · ${player2Handle}: ${player2Score}`;
         const resultText = winner === 'tie'
             ? `Tie` 
@@ -2724,6 +3112,9 @@
         if (winner !== 'tie') {
             winnerHandleSpan.textContent = winner;
             celebrationModal.style.display = 'flex';
+            if (closeCelebrationBtn) {
+                closeCelebrationBtn.textContent = 'Close';
+            }
             
             for (let i = 0; i < 50; i++) {
                 const confetti = document.createElement('div');
@@ -2734,6 +3125,10 @@
                 celebrationModal.appendChild(confetti);
                 setTimeout(() => confetti.remove(), 3000);
             }
+        }
+
+        if (persistResult) {
+            scheduleResultsRedirect(15000);
         }
     }
 
@@ -2769,7 +3164,7 @@
                     'Content-Type': 'application/json',
                     'x-admin-password': enteredPassword
                 },
-                body: JSON.stringify({ password: enteredPassword, requesterHandle: userHandle })
+                body: JSON.stringify({ password: enteredPassword })
             });
 
             if (!response.ok) {
@@ -2794,6 +3189,11 @@
 
     closeCelebrationBtn.addEventListener('click', () => {
         celebrationModal.style.display = 'none';
+        if (celebrationRedirectTimer) {
+            clearTimeout(celebrationRedirectTimer);
+            celebrationRedirectTimer = null;
+        }
+        redirectToResultsPage();
     });
 
     window.addEventListener('click', (e) => {
@@ -2842,7 +3242,7 @@
         window.history.replaceState({}, '', url.toString());
     }
 
-    function init() {
+    async function init() {
         if (typeof Notification !== 'undefined') {
             notificationPermission = Notification.permission === 'granted';
 
@@ -2855,6 +3255,7 @@
             }
         }
         loadSavedState();
+        await syncAuthFromServerSession();
 
         pendingPostLoginReturnTo = getPostLoginReturnTarget();
 
@@ -2867,5 +3268,5 @@
         connectWebSocket();
     }
 
-    init();
+    init().catch(() => {});
 })();

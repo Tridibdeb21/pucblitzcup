@@ -767,7 +767,6 @@
         }
 
         const payload = {
-            ownerHandle,
             name: tournamentName.value.trim() || 'Tournament',
             type: getSelectedType(),
             participants,
@@ -797,7 +796,7 @@
             return;
         }
 
-        let response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
+        let response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}`, {
             method: 'DELETE'
         });
 
@@ -805,14 +804,13 @@
             const adminPassword = prompt('Admin PIN required to delete bracket:');
             if (!adminPassword) return;
 
-            response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}?requesterHandle=${encodeURIComponent(requesterHandle)}`, {
+            response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}`, {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-admin-password': adminPassword,
-                    'x-requester-handle': requesterHandle
+                    'x-admin-password': adminPassword
                 },
-                body: JSON.stringify({ requesterHandle, password: adminPassword })
+                body: JSON.stringify({ password: adminPassword })
             });
         }
 
@@ -841,7 +839,7 @@
         let response = await fetch(`${API_BASE_URL}/api/brackets/${encodeURIComponent(bracketId)}/matches/${encodeURIComponent(matchId)}/create-room`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requesterHandle })
+            body: JSON.stringify({})
         });
 
         if (response.status === 403 && isAdminHandle(requesterHandle)) {
@@ -852,10 +850,9 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-admin-password': adminPassword,
-                    'x-requester-handle': requesterHandle
+                    'x-admin-password': adminPassword
                 },
-                body: JSON.stringify({ requesterHandle, password: adminPassword })
+                body: JSON.stringify({ password: adminPassword })
             });
         }
 

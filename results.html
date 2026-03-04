@@ -198,7 +198,7 @@
 
             if (result.solved) {
                 const acLabel = result.attempts > 0 ? `+${result.attempts}` : '+';
-                const timeHtml = Number.isFinite(Number(result.solvedAtSec))
+                const timeHtml = Number.isFinite(result.solvedAtSec)
                     ? `<span class="result-problem-status-time">${formatElapsedTime(result.solvedAtSec)}</span>`
                     : '';
                 return `<span class="result-problem-status status-ac"><span class="result-problem-status-main">${acLabel}</span>${timeHtml}</span>`;
@@ -410,6 +410,23 @@
             return { handle: target, played, wins, losses, ties, winRate, avgScore, opponentList };
         }
 
+        function getStandingFromResult(result) {
+            const winner = String(result?.winner || '').trim().toLowerCase();
+            const p1 = String(result?.player1?.handle || '').trim().toLowerCase();
+            const p2 = String(result?.player2?.handle || '').trim().toLowerCase();
+
+            if (winner === 'tie') {
+                return { label: 'TIE', className: 'standing-tie' };
+            }
+            if (winner && winner === p1) {
+                return { label: 'P1', className: 'standing-p1' };
+            }
+            if (winner && winner === p2) {
+                return { label: 'P2', className: 'standing-p2' };
+            }
+            return { label: '—', className: 'standing-none' };
+        }
+
         function openUserStats(handle) {
             const stats = buildUserStats(handle, cachedResults);
             userStatsTitle.textContent = `${stats.handle} · Stats`;
@@ -460,6 +477,8 @@
                     focusedResult = r;
                 }
 
+                const standing = getStandingFromResult(r);
+
                 return `
                 <tr data-room-id="${rowRoomId}">
                     <td><strong>#${r.blitzNumber}</strong></td>
@@ -479,7 +498,7 @@
                         </a>
                     </td>
                     <td><strong>${r.player2.score}</strong></td>
-                    <td class="winner">${r.winner === 'tie' ? 'TIE' : r.winner}</td>
+                    <td><span class="standing-badge ${standing.className}">${standing.label}</span></td>
                     <td><button class="details-btn" onclick='showDetails(${JSON.stringify(r).replace(/'/g, "\\'")})'>View</button></td>
                 </tr>
             `}).join('');
@@ -503,6 +522,9 @@
 
             const date = new Date(result.date);
             const formattedDateTime = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+            const standing = getStandingFromResult(result);
+            const spectators = Array.isArray(result.spectators) ? result.spectators.filter(Boolean) : [];
+            const spectatorsText = spectators.length ? spectators.join(', ') : 'No spectators recorded';
 
             let problemsHtml = '<h3 class="modal-subtitle">Problem Details</h3>';
             result.problems.forEach((p, idx) => {
@@ -510,6 +532,12 @@
                     ? `https://codeforces.com/problemset/problem/${p.contestId}/${p.index}`
                     : null);
                 const problemTitle = p.name || `Problem ${idx + 1}`;
+                const p1Link = problemUrl
+                    ? `<a href="${problemUrl}" target="_blank" class="problem-link">P1</a>`
+                    : 'P1';
+                const p2Link = problemUrl
+                    ? `<a href="${problemUrl}" target="_blank" class="problem-link">P2</a>`
+                    : 'P2';
                 problemsHtml += `
                     <div class="problem-detail">
                         <div class="problem-detail-top">
@@ -518,18 +546,19 @@
                                 : problemTitle}</strong>
                             <span>${p.points} pts · Rating ${p.rating}</span>
                         </div>
-                        ${problemUrl ? `<div><a href="${problemUrl}" target="_blank" class="problem-link muted-link">Open problem link</a></div>` : ''}
                         <div class="problem-players">
                             <div>
-                                <a href="#" data-handle="${result.player1.handle}" class="stats-user-link" style="color: ${getRankColor(result.player1.rank)};">
-                                    ${result.player1.handle}
-                                </a>:
+                                ${p1Link}
+                                <a href="#" data-handle="${result.player1.handle}" class="stats-user-link problem-player-handle" style="color: ${getRankColor(result.player1.rank)};">
+                                    (${result.player1.handle})
+                                </a>
                                 ${buildProblemStatusMarkup(p.p1Result)}
                             </div>
                             <div>
-                                <a href="#" data-handle="${result.player2.handle}" class="stats-user-link" style="color: ${getRankColor(result.player2.rank)};">
-                                    ${result.player2.handle}
-                                </a>:
+                                ${p2Link}
+                                <a href="#" data-handle="${result.player2.handle}" class="stats-user-link problem-player-handle" style="color: ${getRankColor(result.player2.rank)};">
+                                    (${result.player2.handle})
+                                </a>
                                 ${buildProblemStatusMarkup(p.p2Result)}
                             </div>
                         </div>
@@ -540,7 +569,8 @@
             modalContent.innerHTML = `
                 <p><strong>Date & Time:</strong> ${formattedDateTime}</p>
                 <p><strong>Duration:</strong> ${result.duration} minutes</p>
-                <p><strong>Winner:</strong> <span class="winner">${result.winner === 'tie' ? 'TIE' : result.winner}</span></p>
+                <p><strong>Standing:</strong> <span class="standing-badge ${standing.className}">${standing.label}</span></p>
+                <p><strong>Spectators:</strong> ${spectatorsText}</p>
                 ${problemsHtml}
             `;
 

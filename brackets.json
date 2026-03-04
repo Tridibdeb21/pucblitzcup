@@ -1,1 +1,305 @@
-[]
+[
+  {
+    "id": "b_1772638300263_5rhtqm",
+    "name": "Tournament",
+    "type": "double-elimination",
+    "ownerHandle": "MishkatIT",
+    "participants": [
+      "sdf",
+      "sdfs",
+      "fsdfsdsfdsdf",
+      "sd",
+      "wer",
+      "c",
+      "dsfsdfsdfsdfsdfsdf",
+      "e",
+      "ee",
+      "weq",
+      "rrwe",
+      "rwser",
+      "wetr",
+      "yfd",
+      "sgs",
+      "fa"
+    ],
+    "roomConfig": {
+      "problemCount": 7,
+      "duration": 40,
+      "interval": 1,
+      "problems": [
+        {
+          "points": 2,
+          "rating": 800
+        },
+        {
+          "points": 3,
+          "rating": 800
+        },
+        {
+          "points": 4,
+          "rating": 900
+        },
+        {
+          "points": 6,
+          "rating": 1000
+        },
+        {
+          "points": 8,
+          "rating": 1000
+        },
+        {
+          "points": 10,
+          "rating": 1100
+        },
+        {
+          "points": 12,
+          "rating": 1200
+        }
+      ]
+    },
+    "usedProblemIds": [],
+    "matches": [
+      {
+        "id": "m1",
+        "round": 1,
+        "label": "Round 1 · Match 1",
+        "p1": "sdf",
+        "p2": "sdfs",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m2",
+        "round": 1,
+        "label": "Round 1 · Match 2",
+        "p1": "fsdfsdsfdsdf",
+        "p2": "sd",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m3",
+        "round": 1,
+        "label": "Round 1 · Match 3",
+        "p1": "wer",
+        "p2": "c",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m4",
+        "round": 1,
+        "label": "Round 1 · Match 4",
+        "p1": "dsfsdfsdfsdfsdfsdf",
+        "p2": "e",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m5",
+        "round": 1,
+        "label": "Round 1 · Match 5",
+        "p1": "ee",
+        "p2": "weq",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m6",
+        "round": 1,
+        "label": "Round 1 · Match 6",
+        "p1": "rrwe",
+        "p2": "rwser",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m7",
+        "round": 1,
+        "label": "Round 1 · Match 7",
+        "p1": "wetr",
+        "p2": "yfd",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m8",
+        "round": 1,
+        "label": "Round 1 · Match 8",
+        "p1": "sgs",
+        "p2": "fa",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m9",
+        "round": 2,
+        "label": "Round 2 · Match 1",
+        "p1": "Winner M1",
+        "p2": "Winner M2",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m10",
+        "round": 2,
+        "label": "Round 2 · Match 2",
+        "p1": "Winner M3",
+        "p2": "Winner M4",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m11",
+        "round": 2,
+        "label": "Round 2 · Match 3",
+        "p1": "Winner M5",
+        "p2": "Winner M6",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m12",
+        "round": 2,
+        "label": "Round 2 · Match 4",
+        "p1": "Winner M7",
+        "p2": "Winner M8",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m13",
+        "round": 3,
+        "label": "Round 3 · Match 1",
+        "p1": "Winner M9",
+        "p2": "Winner M10",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m14",
+        "round": 3,
+        "label": "Round 3 · Match 2",
+        "p1": "Winner M11",
+        "p2": "Winner M12",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m15",
+        "round": 4,
+        "label": "Round 4 · Match 1",
+        "p1": "Winner M13",
+        "p2": "Winner M14",
+        "bracketSide": "main",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m16",
+        "round": 1,
+        "label": "Losers Round 1",
+        "p1": "Loser Slot 1A",
+        "p2": "Loser Slot 1B",
+        "bracketSide": "losers",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m17",
+        "round": 2,
+        "label": "Losers Round 2",
+        "p1": "Loser Slot 2A",
+        "p2": "Loser Slot 2B",
+        "bracketSide": "losers",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m18",
+        "round": 3,
+        "label": "Losers Round 3",
+        "p1": "Loser Slot 3A",
+        "p2": "Loser Slot 3B",
+        "bracketSide": "losers",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m19",
+        "round": 4,
+        "label": "Losers Round 4",
+        "p1": "Loser Slot 4A",
+        "p2": "Loser Slot 4B",
+        "bracketSide": "losers",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      },
+      {
+        "id": "m20",
+        "round": 5,
+        "label": "Grand Final",
+        "p1": "Winners Bracket Champion",
+        "p2": "Losers Bracket Champion",
+        "bracketSide": "final",
+        "status": "pending",
+        "winner": null,
+        "roomId": null,
+        "result": null
+      }
+    ],
+    "createdAt": "2026-03-04T15:31:40.264Z"
+  }
+]

@@ -12,6 +12,32 @@
     let listedHandles = [];
     let listedProfilesLoaded = false;
 
+    function getStoredHandle() {
+        return String(localStorage.getItem('blitzUserHandle') || '').trim();
+    }
+
+    function clearAuthSessionStorage() {
+        localStorage.removeItem('blitzUserHandle');
+        localStorage.removeItem('blitzUserAvatar');
+        localStorage.removeItem('blitzRoomState');
+        localStorage.removeItem('blitzBattleRuntimeState');
+        localStorage.removeItem('blitzPendingJoinRoomId');
+        localStorage.removeItem('blitzAuthMeta');
+    }
+
+    async function logoutCurrentSession() {
+        try {
+            await fetch(`${API_BASE_URL}/api/session/logout`, {
+                method: 'POST',
+                credentials: 'same-origin'
+            });
+        } catch {
+        }
+
+        clearAuthSessionStorage();
+        window.location.reload();
+    }
+
     function normalize(handle) {
         return String(handle || '').trim().toLowerCase();
     }
@@ -232,6 +258,7 @@
             ? 'online now'
             : formatLastSeenLikeCodeforces(presence?.lastSeen);
         const statusClass = presence?.active ? 'status-active' : 'status-offline';
+        const canLogout = !!getStoredHandle();
 
         const opponentsHtml = stats.opponents.length
             ? stats.opponents.slice(0, 8).map(item => `<a href="/${encodeURIComponent(item.handle)}" class="user-stats-handle">${item.handle}</a> (${item.count})`).join(', ')
@@ -255,12 +282,15 @@
 
         profileBody.innerHTML = `
             <div class="user-profile-head">
-                ${avatar ? `<img src="${avatar}" alt="${handle}" class="user-profile-avatar">` : ''}
-                <div>
-                    <div class="user-profile-handle ${handleRankClass}">${handle}</div>
-                    <div class="user-presence ${statusClass}"><span class="presence-dot"></span>${statusText}</div>
-                    <div class="user-profile-rank">${rank} · max ${maxRank}</div>
+                <div class="user-profile-head-main">
+                    ${avatar ? `<img src="${avatar}" alt="${handle}" class="user-profile-avatar">` : ''}
+                    <div>
+                        <div class="user-profile-handle ${handleRankClass}">${handle}</div>
+                        <div class="user-presence ${statusClass}"><span class="presence-dot"></span>${statusText}</div>
+                        <div class="user-profile-rank">${rank} · max ${maxRank}</div>
+                    </div>
                 </div>
+                ${canLogout ? '<button type="button" class="user-profile-logout-btn tiny" data-profile-logout="1">Logout</button>' : ''}
             </div>
             <div class="user-profile-grid">
                 <div class="user-profile-item"><span>Rating</span><strong>${rating}</strong></div>
@@ -344,6 +374,13 @@
             event.preventDefault();
             handleOpenClick();
         }
+    });
+
+    profileBody.addEventListener('click', (event) => {
+        const logoutBtn = event.target.closest('[data-profile-logout]');
+        if (!logoutBtn) return;
+        event.preventDefault();
+        logoutCurrentSession().catch(() => {});
     });
 
     const initialHandle = getHandleFromUrl();

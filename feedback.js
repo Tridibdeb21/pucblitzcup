@@ -14,6 +14,7 @@
     let allItems = [];
     let allActivity = [];
     let searchQuery = '';
+    const expandedReplyComposer = new Set();
 
     function escapeHtml(value) {
         return String(value || '')
@@ -71,12 +72,18 @@
 
             if (!queryTokens.length) return true;
 
+            const replies = Array.isArray(item.replies) ? item.replies : [];
+            const replySearchable = replies
+                .map(reply => `${reply?.message || ''} ${reply?.createdBy || ''}`)
+                .join(' ');
+
             const searchable = [
                 item.title,
                 item.message,
                 item.createdBy,
                 item.updatedBy,
-                item.status
+                item.status,
+                replySearchable
             ]
                 .map(value => String(value || '').toLowerCase())
                 .join(' ');
@@ -96,9 +103,29 @@
             const isOwner = currentHandle && String(item.createdBy || '').toLowerCase() === currentHandle.toLowerCase();
             const canAdminOverride = manager && !isOwner && isAdminHandle(currentHandle);
             const history = Array.isArray(item.history) ? item.history : [];
+            const replies = Array.isArray(item.replies) ? item.replies : [];
+            const isReplyOpen = expandedReplyComposer.has(String(item.id));
             const historyHtml = history.length
                 ? `<div class="feedback-history">${history.slice(-2).map(entry => `Updated by <strong>${escapeHtml(entry.by || 'unknown')}</strong> at ${escapeHtml(formatTime(entry.at))}`).join(' · ')}</div>`
                 : '';
+
+            const repliesHtml = replies.length
+                ? `<div class="feedback-replies">${replies.map(reply => `
+                        <div class="feedback-reply-item">
+                            <div class="feedback-reply-meta">
+                                <span><strong>${escapeHtml(reply.createdBy || 'anonymous')}</strong> · ${escapeHtml(formatTime(reply.createdAt))}</span>
+                                ${(() => {
+                                    const current = getCurrentHandle();
+                                    const isOwnerReply = !!current && String(reply.createdBy || '').toLowerCase() === current.toLowerCase();
+                                    const isAdminReply = isAdminHandle(current);
+                                    if (!isOwnerReply && !isAdminReply) return '';
+                                    return `<button class="action-btn danger mini" data-action="delete-reply" data-id="${escapeHtml(item.id)}" data-reply-id="${escapeHtml(reply.id || '')}" data-admin="${!isOwnerReply && isAdminReply ? '1' : '0'}">Delete</button>`;
+                                })()}
+                            </div>
+                            <div class="feedback-reply-body">${escapeHtml(reply.message || '')}</div>
+                        </div>
+                    `).join('')}</div>`
+                : '<div class="feedback-replies-empty">No replies yet.</div>';
 
             const statusControl = manager
                 ? `<select class="feedback-status-select" data-id="${escapeHtml(item.id)}">\n                        <option value="open" ${normalizeStatus(item.status) === 'open' ? 'selected' : ''}>Open</option>\n                        <option value="fixed" ${normalizeStatus(item.status) === 'fixed' ? 'selected' : ''}>Fixed</option>\n                        <option value="ignored" ${normalizeStatus(item.status) === 'ignored' ? 'selected' : ''}>Ignored</option>\n                    </select>`
@@ -120,6 +147,17 @@
                     </div>
                     <div class="feedback-body">${escapeHtml(item.message || '')}</div>
                     ${historyHtml}
+                    <div class="feedback-reply-block">
+                        <div class="feedback-reply-head">
+                            <div class="feedback-reply-title">Replies (${replies.length})</div>
+                            <button class="action-btn mini" data-action="toggle-reply" data-id="${escapeHtml(item.id)}">${isReplyOpen ? 'Close' : 'Reply'}</button>
+                        </div>
+                        ${repliesHtml}
+                        <div class="feedback-reply-compose ${isReplyOpen ? '' : 'is-hidden'}" data-reply-compose="${escapeHtml(item.id)}">
+                            <textarea class="feedback-reply-input" data-id="${escapeHtml(item.id)}" rows="2" placeholder="Write a reply..."></textarea>
+                            <button class="action-btn" data-action="reply" data-id="${escapeHtml(item.id)}">Post Reply</button>
+                        </div>
+                    </div>
                     <div class="feedback-actions">${actionButtons}</div>
                 </article>
             `;
@@ -175,7 +213,7 @@
         const response = await fetch(`${API_BASE_URL}/api/feedback`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requesterHandle, title, message })
+            body: JSON.stringify({ title, message })
         });
 
         if (!response.ok) {
@@ -208,12 +246,71 @@
                 'Content-Type': 'application/json',
                 ...(adminPin ? { 'x-admin-password': adminPin } : {})
             },
-            body: JSON.stringify({ requesterHandle, ...payload, password: adminPin || undefined })
+            body: JSON.stringify({ ...payload, password: adminPin || undefined })
         });
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
             alert(data.error || 'Could not update feedback right now.');
+            return;
+        }
+
+        loadFeedback();
+    }
+
+    async function submitReply(feedbackId, message) {
+        const requesterHandle = getCurrentHandle();
+        const payload = {
+            message: String(message || '').trim()
+        };
+
+        if (!payload.message) {
+            alert('Please write a reply message.');
+            return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}/replies`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            alert(data.error || 'Could not add reply right now.');
+            return;
+        }
+
+        loadFeedback();
+    }
+
+    async function deleteReply(feedbackId, replyId, requiresAdminPin) {
+        const requesterHandle = getCurrentHandle();
+        if (!requesterHandle) {
+            alert('Please login first');
+            return;
+        }
+
+        if (!confirm('Delete this reply?')) return;
+
+        let adminPin = '';
+        if (requiresAdminPin) {
+            adminPin = prompt('Admin PIN required:') || '';
+            if (!adminPin) return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}/replies/${encodeURIComponent(replyId)}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(adminPin ? { 'x-admin-password': adminPin } : {})
+            },
+            body: JSON.stringify({ password: adminPin || undefined })
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            alert(data.error || 'Could not delete reply right now.');
             return;
         }
 
@@ -235,14 +332,13 @@
             if (!adminPin) return;
         }
 
-        const query = `requesterHandle=${encodeURIComponent(requesterHandle)}`;
-        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}?${query}`, {
+        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
                 ...(adminPin ? { 'x-admin-password': adminPin } : {})
             },
-            body: JSON.stringify({ requesterHandle, password: adminPin || undefined })
+            body: JSON.stringify({ password: adminPin || undefined })
         });
 
         if (!response.ok) {
@@ -310,6 +406,33 @@
 
         if (button.dataset.action === 'delete') {
             deleteFeedback(feedbackId, requiresAdminPin).catch(() => {});
+            return;
+        }
+
+        if (button.dataset.action === 'toggle-reply') {
+            if (expandedReplyComposer.has(feedbackId)) {
+                expandedReplyComposer.delete(feedbackId);
+            } else {
+                expandedReplyComposer.add(feedbackId);
+            }
+            renderFeedbackList();
+            return;
+        }
+
+        if (button.dataset.action === 'reply') {
+            const input = feedbackList.querySelector(`.feedback-reply-input[data-id="${CSS.escape(feedbackId)}"]`);
+            const message = String(input?.value || '').trim();
+            submitReply(feedbackId, message).then(() => {
+                if (input) input.value = '';
+            }).catch(() => {});
+            return;
+        }
+
+        if (button.dataset.action === 'delete-reply') {
+            const replyId = String(button.dataset.replyId || '').trim();
+            if (!replyId) return;
+            const requiresAdminPinForReply = String(button.dataset.admin || '0') === '1';
+            deleteReply(feedbackId, replyId, requiresAdminPinForReply).catch(() => {});
         }
     });
 

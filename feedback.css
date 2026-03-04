@@ -195,6 +195,18 @@ textarea {
     gap: 10px;
 }
 
+.feedback-list {
+    max-height: 62vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.activity-list {
+    max-height: 38vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
 .feedback-card {
     border: 1px solid var(--border);
     background: var(--panel-soft);
@@ -231,6 +243,76 @@ textarea {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.feedback-reply-block {
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+    padding-top: 10px;
+    display: grid;
+    gap: 8px;
+}
+
+.feedback-reply-title {
+    font-size: 0.84rem;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.feedback-reply-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.feedback-replies {
+    display: grid;
+    gap: 8px;
+}
+
+.feedback-reply-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.feedback-reply-meta,
+.feedback-replies-empty {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.feedback-reply-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.feedback-reply-body {
+    margin-top: 4px;
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+}
+
+.feedback-reply-compose {
+    display: grid;
+    gap: 8px;
+}
+
+.feedback-reply-compose.is-hidden {
+    display: none;
+}
+
+.action-btn.mini {
+    padding: 5px 9px;
+    font-size: 0.74rem;
+}
+
+.feedback-reply-input {
+    width: 100%;
 }
 
 .status-badge {

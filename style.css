@@ -503,6 +503,20 @@ button:hover,
     font-weight: 600;
 }
 
+.user-profile-logout-btn {
+    border: 1px solid var(--danger);
+    background: linear-gradient(180deg, #ff9a9a, #ff7d7d);
+    color: #230505;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.user-profile-logout-btn:hover {
+    filter: brightness(1.05);
+}
+
 .user-profile-links a:hover {
     text-decoration: underline;
 }
@@ -801,13 +815,51 @@ button:hover,
     border-radius: 999px;
     padding: 5px 9px;
     background: #141b27;
-    color: #9dc4ff;
+    color: #c9d7ee;
     font-size: 0.84rem;
     font-weight: 600;
     opacity: 1;
     transform: translateY(0) scale(1);
     transition: opacity 0.2s ease, transform 0.2s ease;
     will-change: opacity, transform;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.spectator-chip:hover {
+    transform: translateY(-1px) scale(1.01);
+}
+
+.spectator-chip:focus-visible {
+    outline: 2px solid #6ea8fe;
+    outline-offset: 2px;
+}
+
+.spectator-chip.is-online {
+    border-color: rgba(90, 203, 138, 0.45);
+    background: rgba(90, 203, 138, 0.14);
+    color: #9ff2c3;
+}
+
+.spectator-chip.is-left {
+    border-color: rgba(104, 114, 129, 0.45);
+    background: rgba(47, 54, 66, 0.62);
+    color: #98a5bb;
+}
+
+.spectator-chip-handle {
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.spectator-chip-status {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.9;
 }
 
 .spectator-chip.is-entering {
@@ -936,6 +988,25 @@ button:disabled {
 .leaderboard-table .problem-cell {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     min-width: 62px;
+}
+
+.leaderboard-cf-rank {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    opacity: 0.88;
+}
+
+.leaderboard-standing {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 34px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: #1b2434;
+    border: 1px solid var(--border);
+    font-weight: 700;
+    font-size: 0.8rem;
 }
 
 .leaderboard-table .problem-cell-main {

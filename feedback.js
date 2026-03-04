@@ -10,6 +10,8 @@
     const submitFeedbackBtn = document.getElementById('submitFeedbackBtn');
     const feedbackSearchInput = document.getElementById('feedbackSearchInput');
     const feedbackStatusFilter = document.getElementById('feedbackStatusFilter');
+    const selectAllFeedbackBtn = document.getElementById('selectAllFeedbackBtn');
+    const deleteSelectedFeedbackBtn = document.getElementById('deleteSelectedFeedbackBtn');
     const feedbackList = document.getElementById('feedbackList');
     const feedbackActivity = document.getElementById('feedbackActivity');
 
@@ -17,6 +19,8 @@
     let allActivity = [];
     let searchQuery = '';
     const expandedReplyComposer = new Set();
+    const selectedFeedbackIds = new Set();
+    let visibleSelectableFeedbackIds = [];
 
     function escapeHtml(value) {
         return String(value || '')
@@ -118,16 +122,25 @@
         });
 
         if (!filtered.length) {
+            visibleSelectableFeedbackIds = [];
+            selectedFeedbackIds.clear();
             feedbackList.innerHTML = '<div class="feedback-meta">No feedback found.</div>';
+            refreshBulkDeleteUi();
             return;
         }
 
         const currentHandle = getCurrentHandle();
 
+        const nextVisibleSelectableIds = [];
+
         feedbackList.innerHTML = filtered.map(item => {
             const manager = canManage(item);
             const isOwner = currentHandle && String(item.createdBy || '').toLowerCase() === currentHandle.toLowerCase();
             const canAdminOverride = manager && !isOwner && isAdminHandle(currentHandle);
+            const isSelected = selectedFeedbackIds.has(String(item.id));
+            if (manager) {
+                nextVisibleSelectableIds.push(String(item.id));
+            }
             const history = Array.isArray(item.history) ? item.history : [];
             const replies = Array.isArray(item.replies) ? item.replies : [];
             const isReplyOpen = expandedReplyComposer.has(String(item.id));
@@ -164,7 +177,10 @@
             return `
                 <article class="feedback-card">
                     <div class="feedback-head">
-                        <div class="feedback-title">${escapeHtml(item.title || 'Untitled Feedback')}</div>
+                        <div class="feedback-head-left">
+                            ${manager ? `<label class="feedback-select-wrap"><input type="checkbox" data-action="select-feedback" data-id="${escapeHtml(item.id)}" ${isSelected ? 'checked' : ''}><span>Select</span></label>` : ''}
+                            <div class="feedback-title">${escapeHtml(item.title || 'Untitled Feedback')}</div>
+                        </div>
                         ${statusControl}
                     </div>
                     <div class="feedback-meta">
@@ -188,6 +204,29 @@
                 </article>
             `;
         }).join('');
+
+        visibleSelectableFeedbackIds = nextVisibleSelectableIds;
+        for (const selectedId of Array.from(selectedFeedbackIds)) {
+            if (!allItems.some(item => String(item.id) === selectedId)) {
+                selectedFeedbackIds.delete(selectedId);
+            }
+        }
+        refreshBulkDeleteUi();
+    }
+
+    function refreshBulkDeleteUi() {
+        const selectedCount = selectedFeedbackIds.size;
+        if (deleteSelectedFeedbackBtn) {
+            deleteSelectedFeedbackBtn.disabled = selectedCount === 0;
+            deleteSelectedFeedbackBtn.textContent = `Delete Selected (${selectedCount})`;
+        }
+
+        if (selectAllFeedbackBtn) {
+            const allVisibleSelected = visibleSelectableFeedbackIds.length > 0
+                && visibleSelectableFeedbackIds.every(id => selectedFeedbackIds.has(id));
+            selectAllFeedbackBtn.textContent = allVisibleSelected ? 'Unselect All' : 'Select All';
+            selectAllFeedbackBtn.disabled = visibleSelectableFeedbackIds.length === 0;
+        }
     }
 
     function renderActivity() {
@@ -211,12 +250,18 @@
             const payload = await response.json();
             allItems = Array.isArray(payload?.items) ? payload.items : [];
             allActivity = Array.isArray(payload?.activity) ? payload.activity : [];
+            for (const selectedId of Array.from(selectedFeedbackIds)) {
+                if (!allItems.some(item => String(item.id) === selectedId)) {
+                    selectedFeedbackIds.delete(selectedId);
+                }
+            }
             renderFeedbackList();
             renderActivity();
         } catch (error) {
             console.error('Failed to load feedback:', error);
             feedbackList.innerHTML = '<div class="feedback-meta">Could not load feedback right now.</div>';
             feedbackActivity.innerHTML = '';
+            refreshBulkDeleteUi();
         }
     }
 
@@ -343,6 +388,24 @@
         loadFeedback();
     }
 
+    async function deleteFeedbackRequest(feedbackId, adminPin = '') {
+        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(adminPin ? { 'x-admin-password': adminPin } : {})
+            },
+            body: JSON.stringify({ password: adminPin || undefined })
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || 'Could not delete feedback right now.');
+        }
+
+        return true;
+    }
+
     async function deleteFeedback(feedbackId, requiresAdminPin) {
         const requesterHandle = getCurrentHandle();
         if (!requesterHandle) {
@@ -358,22 +421,60 @@
             if (!adminPin) return;
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/feedback/${encodeURIComponent(feedbackId)}`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(adminPin ? { 'x-admin-password': adminPin } : {})
-            },
-            body: JSON.stringify({ password: adminPin || undefined })
-        });
-
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            alert(data.error || 'Could not delete feedback right now.');
+        try {
+            await deleteFeedbackRequest(feedbackId, adminPin);
+        } catch (error) {
+            alert(error?.message || 'Could not delete feedback right now.');
             return;
         }
 
         loadFeedback();
+    }
+
+    async function deleteSelectedFeedback() {
+        const requesterHandle = getCurrentHandle();
+        if (!requesterHandle) {
+            alert('Please login first');
+            return;
+        }
+
+        const selectedItems = allItems.filter(item => selectedFeedbackIds.has(String(item.id)));
+        if (!selectedItems.length) {
+            alert('No feedback selected.');
+            return;
+        }
+
+        const requesterNorm = requesterHandle.toLowerCase();
+        const needsAdminItems = selectedItems.filter(item => String(item.createdBy || '').toLowerCase() !== requesterNorm);
+        if (needsAdminItems.length > 0 && !isAdminHandle(requesterHandle)) {
+            alert('Some selected items are not yours. Only admin can delete those.');
+            return;
+        }
+
+        let adminPin = '';
+        if (needsAdminItems.length > 0) {
+            adminPin = prompt('Admin PIN required for selected non-owner items:') || '';
+            if (!adminPin) return;
+        }
+
+        if (!confirm(`Delete ${selectedItems.length} selected feedback item(s)?`)) return;
+
+        let failed = 0;
+        for (const item of selectedItems) {
+            const isOwner = String(item.createdBy || '').toLowerCase() === requesterNorm;
+            const pin = isOwner ? '' : adminPin;
+            try {
+                await deleteFeedbackRequest(item.id, pin);
+                selectedFeedbackIds.delete(String(item.id));
+            } catch {
+                failed += 1;
+            }
+        }
+
+        await loadFeedback();
+        if (failed > 0) {
+            alert(`${failed} selected item(s) could not be deleted.`);
+        }
     }
 
     submitFeedbackBtn.addEventListener('click', () => {
@@ -385,6 +486,30 @@
 
     feedbackStatusFilter.addEventListener('change', renderFeedbackList);
 
+    if (selectAllFeedbackBtn) {
+        selectAllFeedbackBtn.addEventListener('click', () => {
+            const allVisibleSelected = visibleSelectableFeedbackIds.length > 0
+                && visibleSelectableFeedbackIds.every(id => selectedFeedbackIds.has(id));
+
+            if (allVisibleSelected) {
+                visibleSelectableFeedbackIds.forEach(id => selectedFeedbackIds.delete(id));
+            } else {
+                visibleSelectableFeedbackIds.forEach(id => selectedFeedbackIds.add(id));
+            }
+
+            renderFeedbackList();
+        });
+    }
+
+    if (deleteSelectedFeedbackBtn) {
+        deleteSelectedFeedbackBtn.addEventListener('click', () => {
+            deleteSelectedFeedback().catch(error => {
+                console.error('Bulk delete failed:', error);
+                alert('Could not delete selected feedback right now.');
+            });
+        });
+    }
+
     if (feedbackSearchInput) {
         feedbackSearchInput.addEventListener('input', () => {
             searchQuery = String(feedbackSearchInput.value || '').trim();
@@ -393,6 +518,21 @@
     }
 
     feedbackList.addEventListener('change', (event) => {
+        const checkbox = event.target.closest('input[data-action="select-feedback"]');
+        if (checkbox) {
+            const feedbackId = String(checkbox.dataset.id || '').trim();
+            if (!feedbackId) return;
+
+            if (checkbox.checked) {
+                selectedFeedbackIds.add(feedbackId);
+            } else {
+                selectedFeedbackIds.delete(feedbackId);
+            }
+
+            refreshBulkDeleteUi();
+            return;
+        }
+
         const select = event.target.closest('.feedback-status-select');
         if (!select) return;
 

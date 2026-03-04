@@ -222,6 +222,28 @@ textarea {
     margin-bottom: 8px;
 }
 
+.feedback-head-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.feedback-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.feedback-select-wrap input {
+    width: 14px;
+    height: 14px;
+    accent-color: #6ea8fe;
+}
+
 .feedback-title {
     font-weight: 700;
 }
@@ -309,6 +331,13 @@ textarea {
 .action-btn.mini {
     padding: 5px 9px;
     font-size: 0.74rem;
+}
+
+.action-btn:disabled,
+.primary-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .feedback-reply-input {

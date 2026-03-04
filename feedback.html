@@ -39,7 +39,7 @@
                 <textarea id="feedbackMessageInput" placeholder="Describe your feedback..." rows="4"></textarea>
                 <button id="submitFeedbackBtn" class="primary-btn">Post Feedback</button>
             </div>
-            <p class="note">Only the feedback author or admin can edit/delete entries. Anyone can reply. Replies can be deleted by admin or the reply author.</p>
+            <p class="note">Only the feedback author or admin can edit/delete entries. Anyone can reply. Replies can be deleted by admin or the reply author. Daily submit limit: 100 feedback per user (rolling 24 hours). Use Select All + Delete Selected to remove multiple entries.</p>
         </section>
 
         <section class="panel">
@@ -53,6 +53,8 @@
                         <option value="fixed">Fixed</option>
                         <option value="ignored">Ignored</option>
                     </select>
+                    <button id="selectAllFeedbackBtn" type="button" class="action-btn mini">Select All</button>
+                    <button id="deleteSelectedFeedbackBtn" type="button" class="action-btn danger mini" disabled>Delete Selected (0)</button>
                 </div>
             </div>
             <div id="feedbackList" class="feedback-list"></div>
@@ -65,7 +67,7 @@
 
         <footer class="site-footer">
             <p>© 2026 PUC Blitz Cup. All rights reserved.</p>
-            <p class="site-version">v2.1</p>
+            <p class="site-version">v3.0</p>
             <p>
                 Developers:
                 <a href="https://codeforces.com/profile/ELSE_IF_TRIDIB21" target="_blank" rel="noopener noreferrer">Tridib</a>,

@@ -754,6 +754,13 @@ tr:first-child td {
     cursor: not-allowed;
 }
 
+.small-btn.primary:disabled {
+    opacity: 0.9;
+    color: #081223;
+    border-color: #6ea8fe;
+    background: linear-gradient(180deg, #8bbcff, #6ea8fe);
+}
+
 .site-footer {
     margin-top: 6px;
     padding: 14px 16px;

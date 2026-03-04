@@ -33,6 +33,9 @@ const SESSION_COOKIE_NAME = 'blitz_sid';
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_SECRET = process.env.BLITZ_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const SESSION_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const FEEDBACK_DAILY_LIMIT = 100;
+const ADMIN_PIN_MAX_FAILED_ATTEMPTS = 5;
+const ADMIN_PIN_LOCK_MS = 10 * 60 * 1000;
 
 // Store rooms in memory
 const rooms = new Map();
@@ -41,6 +44,7 @@ const heartbeatSeenMap = new Map();
 let profilesMap = {};
 const sessionStore = new Map();
 const sessionChallengeStore = new Map();
+const adminPinAttempts = new Map();
 
 // Middleware
 app.use(cors());
@@ -208,19 +212,19 @@ function pushFeedbackActivity(store, entry) {
     }
 }
 
-function canManageFeedback(feedbackItem, requesterHandle, adminPassword = '') {
+function canManageFeedback(feedbackItem, requesterHandle, adminPassword = '', req = null) {
     const owner = normalizeHandle(feedbackItem?.createdBy);
     const requester = normalizeHandle(requesterHandle);
     const isOwner = !!owner && !!requester && owner === requester;
-    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '', req);
     return isOwner || isAdmin;
 }
 
-function canDeleteFeedbackReply(replyItem, requesterHandle, adminPassword = '') {
+function canDeleteFeedbackReply(replyItem, requesterHandle, adminPassword = '', req = null) {
     const replyOwner = normalizeHandle(replyItem?.createdBy);
     const requester = normalizeHandle(requesterHandle);
     const isReplyOwner = !!replyOwner && !!requester && replyOwner === requester;
-    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '', req);
     return isReplyOwner || isAdmin;
 }
 
@@ -578,14 +582,14 @@ function generateBracketMatches(type, participants) {
     return generateRoundRobinMatches(participants);
 }
 
-function canManageBracket(bracket, requesterHandle, adminPassword = '') {
+function canManageBracket(bracket, requesterHandle, adminPassword = '', req = null) {
     const isOwner = normalizeHandle(requesterHandle) && normalizeHandle(bracket?.ownerHandle) && normalizeHandle(requesterHandle) === normalizeHandle(bracket.ownerHandle);
-    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '');
+    const isAdmin = isAdminRequester(requesterHandle, adminPassword || '', req);
     return isOwner || isAdmin;
 }
 
-function canCreateBracketRoom(bracket, match, requesterHandle, adminPassword = '') {
-    if (isAdminRequester(requesterHandle, adminPassword || '')) return true;
+function canCreateBracketRoom(bracket, match, requesterHandle, adminPassword = '', req = null) {
+    if (isAdminRequester(requesterHandle, adminPassword || '', req)) return true;
 
     const requester = normalizeHandle(requesterHandle);
     if (!requester) return false;
@@ -1115,9 +1119,84 @@ function isDeveloperAdminHandle(handle) {
     return ADMIN_HANDLE_HASHES.has(hashed);
 }
 
-function isAdminRequester(requesterHandle, adminPassword = '') {
+function getClientAddressForThrottle(req) {
+    const forwarded = String(req?.headers?.['x-forwarded-for'] || '').trim();
+    if (forwarded) {
+        const first = forwarded.split(',')[0].trim();
+        if (first) return first;
+    }
+
+    const ip = String(req?.ip || req?.socket?.remoteAddress || '').trim();
+    return ip || 'unknown';
+}
+
+function getAdminPinAttemptKey(req, requesterHandle) {
+    const normalizedHandle = normalizeHandle(requesterHandle);
+    const clientAddress = getClientAddressForThrottle(req);
+    return `${normalizedHandle}|${clientAddress}`;
+}
+
+function getAdminPinThrottleState(req, requesterHandle) {
+    if (!isDeveloperAdminHandle(requesterHandle)) {
+        return { blocked: false, retryAfterMs: 0 };
+    }
+
+    const key = getAdminPinAttemptKey(req, requesterHandle);
+    const state = adminPinAttempts.get(key);
+    const now = Date.now();
+    if (!state || !state.lockUntil || now >= state.lockUntil) {
+        return { blocked: false, retryAfterMs: 0 };
+    }
+
+    return {
+        blocked: true,
+        retryAfterMs: Math.max(0, state.lockUntil - now)
+    };
+}
+
+function registerAdminPinAttempt(req, requesterHandle, suppliedPassword) {
+    const password = String(suppliedPassword || '').trim();
+    if (!password) return false;
     if (!isDeveloperAdminHandle(requesterHandle)) return false;
-    return isValidAdminPassword(adminPassword || '');
+
+    const key = getAdminPinAttemptKey(req, requesterHandle);
+    const now = Date.now();
+    const state = adminPinAttempts.get(key) || { failedCount: 0, lockUntil: 0 };
+
+    if (state.lockUntil && now < state.lockUntil) {
+        return false;
+    }
+
+    const valid = isValidAdminPassword(password);
+    if (valid) {
+        adminPinAttempts.delete(key);
+        return true;
+    }
+
+    state.failedCount = Number(state.failedCount || 0) + 1;
+    if (state.failedCount >= ADMIN_PIN_MAX_FAILED_ATTEMPTS) {
+        state.failedCount = 0;
+        state.lockUntil = now + ADMIN_PIN_LOCK_MS;
+    } else {
+        state.lockUntil = 0;
+    }
+    adminPinAttempts.set(key, state);
+    return false;
+}
+
+function isAdminRequester(requesterHandle, adminPassword = '', req = null) {
+    if (!isDeveloperAdminHandle(requesterHandle)) return false;
+
+    const supplied = String(adminPassword || '').trim();
+    if (!supplied) return false;
+
+    if (req) {
+        const throttle = getAdminPinThrottleState(req, requesterHandle);
+        if (throttle.blocked) return false;
+        return registerAdminPinAttempt(req, requesterHandle, supplied);
+    }
+
+    return isValidAdminPassword(supplied);
 }
 
 function isValidAdminPassword(input) {
@@ -2676,7 +2755,15 @@ app.post('/api/results', async (req, res) => {
 app.post('/api/admin/verify', (req, res) => {
     const suppliedPassword = extractAdminPassword(req);
     const requesterHandle = extractRequesterHandle(req);
-    if (!isAdminRequester(requesterHandle, suppliedPassword)) {
+
+    const throttle = getAdminPinThrottleState(req, requesterHandle);
+    if (throttle.blocked) {
+        const retryMinutes = Math.max(1, Math.ceil((throttle.retryAfterMs || 0) / 60000));
+        res.status(429).json({ error: `Too many wrong PIN attempts. Try again in ${retryMinutes} minute(s).` });
+        return;
+    }
+
+    if (!isAdminRequester(requesterHandle, suppliedPassword, req)) {
         res.status(401).json({ error: 'Invalid admin credentials' });
         return;
     }
@@ -2687,7 +2774,15 @@ app.post('/api/admin/verify', (req, res) => {
 app.delete('/api/results', async (req, res) => {
     const suppliedPassword = extractAdminPassword(req);
     const requesterHandle = extractRequesterHandle(req);
-    if (!isAdminRequester(requesterHandle, suppliedPassword)) {
+
+    const throttle = getAdminPinThrottleState(req, requesterHandle);
+    if (throttle.blocked) {
+        const retryMinutes = Math.max(1, Math.ceil((throttle.retryAfterMs || 0) / 60000));
+        res.status(429).json({ error: `Too many wrong PIN attempts. Try again in ${retryMinutes} minute(s).` });
+        return;
+    }
+
+    if (!isAdminRequester(requesterHandle, suppliedPassword, req)) {
         res.status(401).json({ error: 'Invalid admin credentials' });
         return;
     }
@@ -2734,6 +2829,21 @@ app.post('/api/feedback', async (req, res) => {
         }
 
         const store = await readFeedbackStore();
+        const requesterNorm = normalizeHandle(requesterHandle);
+        const cutoffMs = Date.now() - (24 * 60 * 60 * 1000);
+        const recentByUserCount = (Array.isArray(store.items) ? store.items : []).reduce((count, item) => {
+            const sameUser = normalizeHandle(item?.createdBy) === requesterNorm;
+            if (!sameUser) return count;
+            const createdMs = new Date(item?.createdAt || 0).getTime();
+            if (!Number.isFinite(createdMs) || createdMs < cutoffMs) return count;
+            return count + 1;
+        }, 0);
+
+        if (recentByUserCount >= FEEDBACK_DAILY_LIMIT) {
+            res.status(429).json({ error: `Daily feedback limit reached (${FEEDBACK_DAILY_LIMIT} per 24 hours)` });
+            return;
+        }
+
         const next = {
             id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             title: title || 'Untitled Feedback',
@@ -2862,7 +2972,7 @@ app.delete('/api/feedback/:feedbackId/replies/:replyId', async (req, res) => {
         }
 
         const reply = replies[replyIndex];
-        if (!canDeleteFeedbackReply(reply, requesterHandle, adminPassword)) {
+        if (!canDeleteFeedbackReply(reply, requesterHandle, adminPassword, req)) {
             res.status(403).json({ error: 'Only reply author or admin can delete this reply' });
             return;
         }
@@ -2920,7 +3030,7 @@ app.patch('/api/feedback/:feedbackId', async (req, res) => {
         }
 
         const current = store.items[index];
-        if (!canManageFeedback(current, requesterHandle, adminPassword)) {
+        if (!canManageFeedback(current, requesterHandle, adminPassword, req)) {
             res.status(403).json({ error: 'Only feedback author or admin can modify this item' });
             return;
         }
@@ -3010,7 +3120,7 @@ app.delete('/api/feedback/:feedbackId', async (req, res) => {
         }
 
         const target = store.items[index];
-        if (!canManageFeedback(target, requesterHandle, adminPassword)) {
+        if (!canManageFeedback(target, requesterHandle, adminPassword, req)) {
             res.status(403).json({ error: 'Only feedback author or admin can delete this item' });
             return;
         }
@@ -3112,7 +3222,7 @@ app.delete('/api/brackets/:bracketId', async (req, res) => {
             return;
         }
 
-        if (!canManageBracket(target, requesterHandle, adminPassword)) {
+        if (!canManageBracket(target, requesterHandle, adminPassword, req)) {
             res.status(403).json({ error: 'Only bracket creator or admin can delete this bracket' });
             return;
         }
@@ -3146,7 +3256,7 @@ app.post('/api/brackets/:bracketId/matches/:matchId/create-room', async (req, re
             return;
         }
 
-        if (!canCreateBracketRoom(bracket, match, requesterHandle, adminPassword)) {
+        if (!canCreateBracketRoom(bracket, match, requesterHandle, adminPassword, req)) {
             res.status(403).json({ error: 'Only match players, bracket creator, or admin can create match rooms' });
             return;
         }

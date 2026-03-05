@@ -6,6 +6,76 @@ const http = require('http');
 const WebSocket = require('ws');
 const crypto = require('crypto');
 
+// database for persistent storage of results
+const sqlite3 = require('sqlite3').verbose();
+const DB_FILE = path.join(__dirname, 'blitz.db');
+let db;
+
+function dbRun(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.run(sql, params, function (err) {
+            if (err) return reject(err);
+            resolve(this);
+        });
+    });
+}
+
+function dbAll(sql, params = []) {
+    return new Promise((resolve, reject) => {
+        db.all(sql, params, (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows);
+        });
+    });
+}
+
+async function initDb() {
+    db = new sqlite3.Database(DB_FILE);
+    await dbRun(`CREATE TABLE IF NOT EXISTS results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        matchKey TEXT UNIQUE,
+        blitzNumber INTEGER,
+        roomId TEXT,
+        date TEXT,
+        duration INTEGER,
+        player1 TEXT,
+        player2 TEXT,
+        winner TEXT,
+        spectators TEXT,
+        problems TEXT
+    )`);
+}
+
+async function migrateJson() {
+    // pull any existing results from the old JSON file so deployments don't lose data
+    try {
+        const raw = await fs.readFile(RESULTS_FILE, 'utf8');
+        const arr = JSON.parse(raw || '[]');
+        for (const r of arr) {
+            await dbRun(
+                `INSERT OR IGNORE INTO results
+                 (matchKey, blitzNumber, roomId, date, duration,
+                  player1, player2, winner, spectators, problems)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    r.matchKey || null,
+                    r.blitzNumber || null,
+                    r.roomId || '',
+                    r.date || '',
+                    r.duration || 0,
+                    JSON.stringify(r.player1 || {}),
+                    JSON.stringify(r.player2 || {}),
+                    r.winner || '',
+                    JSON.stringify(r.spectators || []),
+                    JSON.stringify(r.problems || [])
+                ]
+            );
+        }
+    } catch (_e) {
+        // ignore if file not present or malformed
+    }
+}
+
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -52,24 +122,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
 
-// Initialize results file
-async function initResultsFile() {
-    try {
-        const raw = await fs.readFile(RESULTS_FILE, 'utf8');
-        const trimmed = String(raw || '').trim();
-        if (!trimmed) {
-            await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
-            return;
-        }
-
-        const parsed = JSON.parse(trimmed);
-        if (!Array.isArray(parsed)) {
-            await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
-        }
-    } catch {
-        await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
-    }
-}
 
 async function initBracketsFile() {
     try {
@@ -2730,15 +2782,15 @@ function sendActiveRooms(ws) {
 // API Routes
 app.get('/api/results', async (req, res) => {
     try {
-        const data = await fs.readFile(RESULTS_FILE, 'utf8');
-        const parsed = JSON.parse(data);
-        const { normalized, changed } = ensureSequentialBlitzNumbers(parsed);
-
-        if (changed) {
-            await fs.writeFile(RESULTS_FILE, JSON.stringify(normalized, null, 2));
-        }
-
-        res.json(normalized);
+        const rows = await dbAll('SELECT * FROM results ORDER BY blitzNumber DESC');
+        const results = rows.map(r => ({
+            ...r,
+            player1: JSON.parse(r.player1 || '{}'),
+            player2: JSON.parse(r.player2 || '{}'),
+            spectators: JSON.parse(r.spectators || '[]'),
+            problems: JSON.parse(r.problems || '[]')
+        }));
+        res.json(results);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -2909,47 +2961,61 @@ app.post('/api/session/logout', (req, res) => {
 
 app.post('/api/results', async (req, res) => {
     try {
-        const current = JSON.parse(await fs.readFile(RESULTS_FILE, 'utf8'));
-        const normalizedState = ensureSequentialBlitzNumbers(current);
-        let results = normalizedState.normalized;
         const payload = req.body || {};
         const key = payload.matchKey;
 
         if (key) {
-            const existingIndex = results.findIndex(item => item.matchKey === key);
-            if (existingIndex >= 0) {
-                const existingNumber = results[existingIndex].blitzNumber;
-                results[existingIndex] = {
-                    ...payload,
-                    blitzNumber: existingNumber
-                };
-            } else {
-
-            const finalState = ensureSequentialBlitzNumbers(results);
-            results = finalState.normalized;
-                const maxBlitzNumber = results.reduce((max, item) => {
-                    const value = Number(item.blitzNumber) || 0;
-                    return Math.max(max, value);
-                }, 0);
-                results.push({
-                    ...payload,
-                    blitzNumber: maxBlitzNumber + 1
-                });
-            }
+            // upsert based on matchKey: keep existing blitzNumber if present
+            await dbRun(
+                `INSERT INTO results(matchKey, blitzNumber, roomId, date, duration,
+                                     player1, player2, winner, spectators, problems)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(matchKey) DO UPDATE SET
+                    roomId=excluded.roomId,
+                    date=excluded.date,
+                    duration=excluded.duration,
+                    player1=excluded.player1,
+                    player2=excluded.player2,
+                    winner=excluded.winner,
+                    spectators=excluded.spectators,
+                    problems=excluded.problems`,
+                [
+                    key,
+                    payload.blitzNumber || null,
+                    payload.roomId || '',
+                    payload.date || '',
+                    payload.duration || 0,
+                    JSON.stringify(payload.player1 || {}),
+                    JSON.stringify(payload.player2 || {}),
+                    payload.winner || '',
+                    JSON.stringify(payload.spectators || []),
+                    JSON.stringify(payload.problems || [])
+                ]
+            );
         } else {
-            const maxBlitzNumber = results.reduce((max, item) => {
-                const value = Number(item.blitzNumber) || 0;
-                return Math.max(max, value);
-            }, 0);
-            results.push({
-                ...payload,
-                blitzNumber: maxBlitzNumber + 1
-            });
+            // insert new row with next blitzNumber
+            const row = (await dbAll('SELECT MAX(blitzNumber) as maxBlitz FROM results'))[0];
+            const nextNumber = (row && row.maxBlitz) ? row.maxBlitz + 1 : 1;
+
+            await dbRun(
+                `INSERT INTO results(blitzNumber, roomId, date, duration,
+                                     player1, player2, winner, spectators, problems)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    nextNumber,
+                    payload.roomId || '',
+                    payload.date || '',
+                    payload.duration || 0,
+                    JSON.stringify(payload.player1 || {}),
+                    JSON.stringify(payload.player2 || {}),
+                    payload.winner || '',
+                    JSON.stringify(payload.spectators || []),
+                    JSON.stringify(payload.problems || [])
+                ]
+            );
         }
 
-        await fs.writeFile(RESULTS_FILE, JSON.stringify(results, null, 2));
         await updateBracketMatchFromResult(payload);
-
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(JSON.stringify({ type: 'RESULTS_UPDATED' }));
@@ -2998,7 +3064,7 @@ app.delete('/api/results', async (req, res) => {
     }
 
     try {
-        await fs.writeFile(RESULTS_FILE, JSON.stringify([]));
+        await dbRun('DELETE FROM results');
 
         wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
@@ -3581,7 +3647,7 @@ app.get('/:handle([A-Za-z0-9._-]{1,24})', (req, res, next) => {
     res.redirect(302, `/profile.html?handle=${encodeURIComponent(handle)}`);
 });
 
-Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
+Promise.all([initDb().then(migrateJson), initBracketsFile(), initFeedbackFile(), initLastSeenFile(), initProfilesFile()]).then(() => {
     setInterval(() => {
         cleanupExpiredSessions();
     }, 10 * 60 * 1000);
@@ -3609,7 +3675,7 @@ Promise.all([initResultsFile(), initBracketsFile(), initFeedbackFile(), initLast
     });
 
     server.listen(PORT, () => {
-        console.log(`Server running on https://blitzing-2.onrender.com`);
+        console.log(`Server running on http://localhost:${PORT}`);
     });
 }).catch((error) => {
     console.error('Server initialization failed:', error);

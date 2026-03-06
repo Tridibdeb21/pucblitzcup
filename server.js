@@ -6,103 +6,72 @@ const http = require('http');
 const WebSocket = require('ws');
 const crypto = require('crypto');
 
-// database for persistent storage of results
-const sqlite3 = require('sqlite3').verbose();
-// database configuration
-const DEFAULT_DB_PATH = path.join(__dirname, 'blitz.db');
-// prefer an explicit override, then Render-style DATA_DIR, then /data, otherwise fall back to local
-let DB_FILE = process.env.DB_PATH ||
-              (process.env.DATA_DIR && path.join(process.env.DATA_DIR, 'blitz.db')) ||
-              '/data/blitz.db' ||
-              DEFAULT_DB_PATH;
-console.log('DB_PATH environment variable:', process.env.DB_PATH);
-console.log('DATA_DIR environment variable:', process.env.DATA_DIR);
-console.log('selected sqlite database file at', DB_FILE);
-let db;
+// PostgreSQL database for persistent storage of results
+const { Pool } = require('pg');
 
-function dbRun(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) return reject(err);
-            resolve(this);
-        });
-    });
+let pool;
+
+// Convert SQL parameters from SQLite style (?) to PostgreSQL style ($1, $2, etc.)
+function convertParamsToPostgres(sql) {
+    let paramIndex = 1;
+    return sql.replace(/\?/g, () => `$${paramIndex++}`);
 }
 
-function dbAll(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows);
-        });
-    });
+async function dbRun(sql, params = []) {
+    try {
+        const convertedSql = convertParamsToPostgres(sql);
+        const result = await pool.query(convertedSql, params);
+        return result;
+    } catch (err) {
+        console.error('Database error:', err.message, 'SQL:', sql);
+        throw err;
+    }
+}
+
+async function dbAll(sql, params = []) {
+    try {
+        const convertedSql = convertParamsToPostgres(sql);
+        const result = await pool.query(convertedSql, params);
+        return result.rows;
+    } catch (err) {
+        console.error('Database error:', err.message, 'SQL:', sql);
+        throw err;
+    }
 }
 
 async function initDb() {
-    // make sure path exists and is writable
-    const dir = path.dirname(DB_FILE);
-    let attemptedPaths = [];
-    try {
-        await fs.mkdir(dir, { recursive: true });
-        // try writing a temp file to verify write access
-        const testPath = path.join(dir, `.write_test_${Date.now()}`);
-        await fs.writeFile(testPath, '');
-        await fs.unlink(testPath);
-    } catch (err) {
-        console.warn(`could not prepare database directory ${dir}:`, err.message);
-        console.warn('falling back to project-local database (data may not persist across restarts)');
-        console.warn('consider setting DB_PATH to a writable location or mounting a persistent volume');
-        // revert to local file
-        DB_FILE = path.join(__dirname, 'blitz.db');
-        try {
-            await fs.mkdir(path.dirname(DB_FILE), { recursive: true });
-        } catch {}
-    }
-
-    async function openDb(pathToOpen) {
-        return new Promise((resolve, reject) => {
-            const instance = new sqlite3.Database(pathToOpen, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
-                if (err) {
-                    return reject(err);
-                }
-                resolve(instance);
-            });
-        });
+    const DATABASE_URL = process.env.DATABASE_URL;
+    
+    if (!DATABASE_URL) {
+        console.error('ERROR: DATABASE_URL environment variable is not set');
+        console.error('On Render, this is automatically set when you provision a PostgreSQL database');
+        throw new Error('DATABASE_URL not configured');
     }
 
     try {
-        db = await openDb(DB_FILE);
-        console.log('opened sqlite database at', DB_FILE);
-    } catch (err) {
-        console.error('failed to open sqlite database at', DB_FILE, err.message);
-        // try default location if not already
-        if (DB_FILE !== DEFAULT_DB_PATH) {
-            console.warn('attempting fallback to default path', DEFAULT_DB_PATH);
-            DB_FILE = DEFAULT_DB_PATH;
-            try {
-                await fs.mkdir(path.dirname(DB_FILE), { recursive: true });
-            } catch {}
-            try {
-                db = await openDb(DB_FILE);
-                console.log('opened fallback database at', DB_FILE);
-            } catch (err2) {
-                console.error('fallback open also failed:', err2.message);
+        pool = new Pool({
+            connectionString: DATABASE_URL,
+            ssl: {
+                rejectUnauthorized: false
             }
-        }
-    }
+        });
 
-    if (!db) {
-        console.warn('opening sqlite database failed entirely; using in-memory database instead');
-        db = new sqlite3.Database(':memory:');
+        // Test the connection
+        const client = await pool.connect();
+        console.log('Connected to PostgreSQL database');
+        client.release();
+    } catch (err) {
+        console.error('Failed to connect to PostgreSQL database:', err.message);
+        throw err;
     }
 
     // log and prevent unhandled error events
-    db.on('error', (err) => {
-        console.error('sqlite database error event:', err.message);
+    pool.on('error', (err) => {
+        console.error('Unexpected error on idle client:', err.message);
     });
 
     await dbRun(`CREATE TABLE IF NOT EXISTS results (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         matchKey TEXT UNIQUE,
         blitzNumber INTEGER,
         roomId TEXT,
@@ -123,10 +92,11 @@ async function migrateJson() {
         const arr = JSON.parse(raw || '[]');
         for (const r of arr) {
             await dbRun(
-                `INSERT OR IGNORE INTO results
+                `INSERT INTO results
                  (matchKey, blitzNumber, roomId, date, duration,
                   player1, player2, winner, spectators, problems)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (matchKey) DO NOTHING`,
                 [
                     r.matchKey || null,
                     r.blitzNumber || null,

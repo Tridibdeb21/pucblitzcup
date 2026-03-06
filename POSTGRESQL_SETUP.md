@@ -131,7 +131,26 @@ To backup your database from Render:
 
 ### Error: "DATABASE_URL not configured"
 
-**Solution**: Make sure you've set the `DATABASE_URL` environment variable in Render dashboard.
+This runtime error means your app started without a connection string – `process.env.DATABASE_URL` was empty.
+
+**Possible causes:**
+1. You haven’t created a PostgreSQL instance on Render yet.
+2. You created the database but didn’t add the `DATABASE_URL` variable to your **Web Service**. (The database itself sets the variable only on its own dashboard, not automatically on other services.)
+3. The variable was added to the wrong service or with a typo in the key name.
+
+**Solution:**
+- Go to the Render dashboard
+- Open your PostgreSQL database page and copy the **Internal Database URL**
+- Open your **Web Service** (the one running `server.js`)
+- Navigate to the **Environment** tab and create or update the variable:
+  - **Key**: `DATABASE_URL`
+  - **Value**: paste the URL from the previous step
+- Save and let the service redeploy
+
+After redeploy you should see `Connected to PostgreSQL database` in the logs and the error will disappear.
+
+If you don’t yet have a DB instance, follow the steps in
+"Create PostgreSQL Database on Render" above and then add the variable.
 
 ### Error: "could not connect to PostgreSQL"
 

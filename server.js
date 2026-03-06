@@ -83,6 +83,31 @@ async function initDb() {
         spectators TEXT,
         problems TEXT
     )`);
+
+    // persistent JSON-backed stores for feedback, brackets, profiles, and rooms
+    await dbRun(`CREATE TABLE IF NOT EXISTS feedback_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data JSON
+    )`);
+
+    await dbRun(`CREATE TABLE IF NOT EXISTS brackets_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data JSON
+    )`);
+
+    await dbRun(`CREATE TABLE IF NOT EXISTS profiles_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data JSON
+    )`);
+
+    // store active/persisted rooms separately; the data field will contain a serialized copy of the
+    // room object (timeouts removed). active flag allows removing rows when the room closes.
+    await dbRun(`CREATE TABLE IF NOT EXISTS rooms_store (
+        id TEXT PRIMARY KEY,
+        data JSON,
+        active BOOLEAN,
+        updatedAt TEXT
+    )`);
 }
 
 async function migrateJson() {
@@ -113,6 +138,30 @@ async function migrateJson() {
         }
     } catch (_e) {
         // ignore if file not present or malformed
+    }
+
+    // also migrate the other JSON-backed stores so they survive a Render spin
+    try {
+        // feedback
+        const fbRaw = await fs.readFile(FEEDBACK_FILE, 'utf8');
+        const fbData = normalizeFeedbackStoreShape(JSON.parse(fbRaw || '{}'));
+        await dbRun('INSERT INTO feedback_store(id,data) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET data=$1', [JSON.stringify(fbData)]);
+    } catch (_e) {
+        // ignore missing file
+    }
+
+    try {
+        const brRaw = await fs.readFile(BRACKETS_FILE, 'utf8');
+        const brArr = Array.isArray(JSON.parse(brRaw || '[]')) ? JSON.parse(brRaw || '[]') : [];
+        await dbRun('INSERT INTO brackets_store(id,data) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET data=$1', [JSON.stringify(brArr)]);
+    } catch (_e) {
+    }
+
+    try {
+        const prRaw = await fs.readFile(PROFILES_FILE, 'utf8');
+        const prData = JSON.parse(prRaw || '[]');
+        await dbRun('INSERT INTO profiles_store(id,data) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET data=$1', [JSON.stringify(prData)]);
+    } catch (_e) {
     }
 }
 
@@ -1547,11 +1596,14 @@ async function verifyTimerEndSubmissions(room) {
         const p2Analysis = analyzeServerSubmissionsForProblem(p2Data, currentProblem, deadlineMs, minMs);
 
         let solverHandle = null;
+        let submitMs = null;
         if (p1Analysis.accepted || p2Analysis.accepted) {
             if (!p2Analysis.accepted || (p1Analysis.accepted && p1Analysis.accepted.submitMs <= p2Analysis.accepted.submitMs)) {
                 solverHandle = p1;
+                submitMs = p1Analysis.accepted.submitMs;
             } else {
                 solverHandle = p2;
+                submitMs = p2Analysis.accepted.submitMs;
             }
         }
 
@@ -1562,17 +1614,19 @@ async function verifyTimerEndSubmissions(room) {
 
             if (!room.battleState.problemWinners[key]) {
                 room.battleState.problemWinners[key] = solverHandle;
+                room.persistentProblemWinners[key] = solverHandle;
                 const solveKey = `${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}:${solverHandle}`;
                 room.battleState.solveAnnouncements[solveKey] = true;
 
                 // compute solve time relative to battle start (in seconds)
-                const solveTimeSec = room.battleState && room.battleState.startsAt
-                    ? Math.max(0, Math.floor((Date.now() - Number(room.battleState.startsAt)) / 1000))
+                const solveTimeSec = room.battleState && room.battleState.startsAt && submitMs
+                    ? Math.max(0, Math.floor((submitMs - Number(room.battleState.startsAt)) / 1000))
                     : null;
 
                 // record in persistent maps
                 if (!room.battleState.problemSolveTimes) room.battleState.problemSolveTimes = {};
                 room.battleState.problemSolveTimes[key] = solveTimeSec;
+                room.persistentProblemSolveTimes[key] = solveTimeSec;
 
                 sendToRoom(room, {
                     type: 'PROBLEM_SOLVED',
@@ -1865,8 +1919,8 @@ async function startBattleForPair(room, startP1, startP2) {
         usedProblemIds,
         problemConfigs: room.problems,
         generatedProblemLocks: {},
-        problemWinners: {},          // map problemKey -> solverHandle or { handle, solvedAtSec }
-        problemSolveTimes: {},        // additional map for easy lookup
+        problemWinners: { ...room.persistentProblemWinners },          // map problemKey -> solverHandle or { handle, solvedAtSec }
+        problemSolveTimes: { ...room.persistentProblemSolveTimes },        // additional map for easy lookup
         solveAnnouncements: {},
         liveState: {
             currentProblemNumber: firstProblem ? 1 : 0,
@@ -2176,7 +2230,9 @@ function createRoomWithSharedLogic({
         pendingSubmissionActive: false,
         validationCheckInProgress: false,
         startInProgress: false,
-        breakAdvanceTimeout: null
+        breakAdvanceTimeout: null,
+        persistentProblemWinners: {},
+        persistentProblemSolveTimes: {}
     };
 
     rooms.set(roomId, room);
@@ -2478,47 +2534,69 @@ async function handleProblemSolved(ws, data) {
     const sender = room.players.find(player => player.ws === ws);
     if (!sender || !sender.handle) return;
 
-    const solverHandle = (data.solverHandle || '').trim();
-    const problemId = (data.problemId || '').trim();
     const problemNumber = data.problemNumber;
-    if (!solverHandle || !problemId) return;
+    const problemIndex = problemNumber - 1;
+    const currentProblem = room.battleState.selectedProblems?.[problemIndex];
+    if (!currentProblem || !currentProblem.contestId || !currentProblem.index) return;
 
-    if (!room.players.some(player => player.handle === solverHandle)) return;
+    const p1 = room.battleState.player1Handle;
+    const p2 = room.battleState.player2Handle;
+    const minMs = Number(room.battleState.liveState?.updatedAt) || Number(room.battleState.startsAt) || 0;
 
-    if (!room.battleState.solveAnnouncements) {
-        room.battleState.solveAnnouncements = {};
-    }
-    if (!room.battleState.problemWinners) {
-        room.battleState.problemWinners = {};
-    }
+    try {
+        const [p1Data, p2Data] = await Promise.all([
+            fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p1)}&from=1&count=100`),
+            fetchJson(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(p2)}&from=1&count=100`)
+        ]);
 
-    const problemWinnerKey = `${problemNumber}:${problemId}`;
-    if (room.battleState.problemWinners[problemWinnerKey]) {
-        return;
-    }
-    room.battleState.problemWinners[problemWinnerKey] = solverHandle;
+        const p1Analysis = analyzeServerSubmissionsForProblem(p1Data, currentProblem, null, minMs);
+        const p2Analysis = analyzeServerSubmissionsForProblem(p2Data, currentProblem, null, minMs);
 
-    // compute solve time in seconds relative to battle start
-    const solveTimeSec = room.battleState.startsAt
-        ? Math.max(0, Math.floor((Date.now() - Number(room.battleState.startsAt)) / 1000))
-        : null;
-    // record for later retrieval
-    if (!room.battleState.problemSolveTimes) room.battleState.problemSolveTimes = {};
-    room.battleState.problemSolveTimes[problemWinnerKey] = solveTimeSec;
+        let solverHandle = null;
+        let submitMs = null;
+        if (p1Analysis.accepted || p2Analysis.accepted) {
+            if (!p2Analysis.accepted || (p1Analysis.accepted && p1Analysis.accepted.submitMs <= p2Analysis.accepted.submitMs)) {
+                solverHandle = p1;
+                submitMs = p1Analysis.accepted.submitMs;
+            } else {
+                solverHandle = p2;
+                submitMs = p2Analysis.accepted.submitMs;
+            }
+        }
 
-    const solveKey = `${problemId}:${solverHandle}`;
-    if (room.battleState.solveAnnouncements[solveKey]) return;
-    room.battleState.solveAnnouncements[solveKey] = true;
+        if (!solverHandle) return; // no one solved yet
 
-    sendToRoom(room, {
-        type: 'PROBLEM_SOLVED',
-        roomId: room.id,
-        solverHandle,
-        problemId,
-        problemNumber,
-        solveKey,
-        solvedAtSec: solveTimeSec
-    });
+        if (!room.persistentProblemWinners) room.persistentProblemWinners = {};
+        if (!room.persistentProblemSolveTimes) room.persistentProblemSolveTimes = {};
+
+        const problemWinnerKey = `${problemNumber}:${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}`;
+        if (room.battleState.problemWinners[problemWinnerKey]) return; // already recorded
+
+        room.battleState.problemWinners[problemWinnerKey] = solverHandle;
+        room.persistentProblemWinners[problemWinnerKey] = solverHandle;
+
+        const solveTimeSec = room.battleState.startsAt && submitMs
+            ? Math.max(0, Math.floor((submitMs - Number(room.battleState.startsAt)) / 1000))
+            : null;
+
+        if (!room.battleState.problemSolveTimes) room.battleState.problemSolveTimes = {};
+        room.battleState.problemSolveTimes[problemWinnerKey] = solveTimeSec;
+        room.persistentProblemSolveTimes[problemWinnerKey] = solveTimeSec;
+
+        const solveKey = `${currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`}:${solverHandle}`;
+        if (!room.battleState.solveAnnouncements) room.battleState.solveAnnouncements = {};
+        if (room.battleState.solveAnnouncements[solveKey]) return;
+        room.battleState.solveAnnouncements[solveKey] = true;
+
+        sendToRoom(room, {
+            type: 'PROBLEM_SOLVED',
+            roomId: room.id,
+            solverHandle,
+            problemId: currentProblem.id || `${currentProblem.contestId}${currentProblem.index}`,
+            problemNumber,
+            solveKey,
+            solvedAtSec: solveTimeSec
+        });
 
     const totalProblems = (room.battleState.problemConfigs || room.problems || []).length;
     const solvedProblemNumber = Number(problemNumber) || 0;
